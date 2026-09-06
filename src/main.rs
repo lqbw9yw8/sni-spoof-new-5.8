@@ -45,12 +45,37 @@ pub struct RelayId {
 
 impl RelayId {
     pub fn desired(settings: &config::Settings) -> Self {
+        let (connect_host, fake_sni) = if settings.relay_connect_host == "auto"
+            || settings.relay_fake_sni == "auto"
+            || (settings.relay_enabled && settings.relay_connect_host.is_empty())
+        {
+            if let Some((best_ip, best_sni)) =
+                dpi_guard::scanner::auto_select_best_relay_target(std::time::Duration::from_millis(1500))
+            {
+                let host = if settings.relay_connect_host == "auto" || settings.relay_connect_host.is_empty() {
+                    best_ip
+                } else {
+                    settings.relay_connect_host.clone()
+                };
+                let sni = if settings.relay_fake_sni == "auto" || settings.relay_fake_sni.is_empty() {
+                    best_sni
+                } else {
+                    settings.relay_fake_sni.clone()
+                };
+                (host, sni)
+            } else {
+                (settings.relay_connect_host.clone(), settings.relay_fake_sni.clone())
+            }
+        } else {
+            (settings.relay_connect_host.clone(), settings.relay_fake_sni.clone())
+        };
+
         RelayId {
             enabled: settings.relay_enabled,
             listen_port: settings.relay_listen_port,
-            connect_host: settings.relay_connect_host.clone(),
+            connect_host,
             connect_port: settings.relay_connect_port,
-            fake_sni: settings.relay_fake_sni.clone(),
+            fake_sni,
             resolve_doh: settings.relay_resolve_doh,
             doh_server: settings.doh_server.clone(),
             mutate_real_sni: settings.relay_mutate_real_sni,

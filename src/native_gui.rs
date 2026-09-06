@@ -481,9 +481,24 @@ impl DpiGuardApp {
         ui.separator();
         check_row(ui, "Enable relay", &mut s.relay_enabled);
         drag_row(ui, "Relay listen port:", &mut s.relay_listen_port, 1..=65_535, "v2rayN connects here");
-        text_row(ui, "Real destination (IP or domain):", &mut s.relay_connect_host, "e.g. 1.1.1.1");
+        text_row(ui, "Real destination (IP or domain):", &mut s.relay_connect_host, "e.g. 104.19.229.21 or auto");
         drag_row(ui, "Real destination port:", &mut s.relay_connect_port, 1..=65_535, "");
-        text_row(ui, "Injected fake SNI:", &mut s.relay_fake_sni, "e.g. www.microsoft.com");
+        text_row(ui, "Injected fake SNI:", &mut s.relay_fake_sni, "e.g. hcaptcha.com or auto");
+
+        ui.horizontal(|ui| {
+            if ui.button("⚡ Test & Select Lowest Ping Target").clicked() {
+                if let Some((best_ip, best_sni)) =
+                    crate::scanner::auto_select_best_relay_target(std::time::Duration::from_millis(1500))
+                {
+                    self.settings.relay_connect_host = best_ip.clone();
+                    self.settings.relay_fake_sni = best_sni.clone();
+                    self.message = format!("Selected lowest ping: {} ({})", best_sni, best_ip);
+                } else {
+                    self.message = "No reachable candidate responded in time".into();
+                }
+            }
+        });
+
         check_row(ui, "Resolve destination via DoH", &mut s.relay_resolve_doh);
         check_row(ui, "Mutate real SNI in relay stream", &mut s.relay_mutate_real_sni);
         check_row(ui, "Emit decoy on injection", &mut s.relay_emit_decoy);

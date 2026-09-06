@@ -671,13 +671,15 @@ function validateField(f, raw) {
   }
   switch (f.k) {
     case "relay_connect_host":
-      if (!isIP(s) && !isHost(s)) return "Must be a valid IP or hostname";
+      if (s.toLowerCase() === "auto") return "";
+      if (!isIP(s) && !isHost(s)) return "Must be a valid IP or hostname (or 'auto')";
       if (/^(127\.|::1$|169\.254\.169\.254$|localhost)/i.test(s)) return "loopback/metadata is not allowed";
       return "";
     case "relay_fake_sni":
     case "fronting_benign_sni":
+      if (s.toLowerCase() === "auto") return "";
       if (s.length > 253) return "253 characters max";
-      return isSniChars(s) ? "" : "Letters/digits/dot/hyphen/underscore only";
+      return isSniChars(s) ? "" : "Letters/digits/dot/hyphen/underscore only (or 'auto')";
     case "doh_server": {
       // Mirrors netguard::validate_doh_url: https only, no userinfo, and
       // never a loopback/link-local/metadata host.

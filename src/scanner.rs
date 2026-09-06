@@ -77,6 +77,7 @@ impl SpoofCandidatePair {
 /// Pre-configured list of verified, high-performance (CONNECT_IP, FAKE_SNI) pairs for Iranian networks.
 pub fn default_spoof_pairs() -> Vec<SpoofCandidatePair> {
     vec![
+        // Category 1: Cloudflare & Vercel
         SpoofCandidatePair::new(
             "Cloudflare",
             "104.19.229.21",
@@ -126,6 +127,7 @@ pub fn default_spoof_pairs() -> Vec<SpoofCandidatePair> {
             "speed.cloudflare.com",
             "Cloudflare Speed Test Edge",
         ),
+        // Category 2: Fastly CDN
         SpoofCandidatePair::new(
             "Fastly",
             "151.101.1.140",
@@ -141,6 +143,36 @@ pub fn default_spoof_pairs() -> Vec<SpoofCandidatePair> {
             "Fastly GitHub Global Edge",
         ),
         SpoofCandidatePair::new(
+            "Fastly",
+            "151.101.129.140",
+            443,
+            "launchpad.net",
+            "Fastly Launchpad / Ubuntu Repo",
+        ),
+        // Category 3: Amazon CloudFront / AWS
+        SpoofCandidatePair::new(
+            "Amazon",
+            "13.224.0.1",
+            443,
+            "aws.amazon.com",
+            "Amazon AWS Main Portal",
+        ),
+        SpoofCandidatePair::new(
+            "Amazon",
+            "99.84.0.1",
+            443,
+            "d1.awsstatic.com",
+            "Amazon AWS Static Assets",
+        ),
+        SpoofCandidatePair::new(
+            "Amazon",
+            "54.230.0.1",
+            443,
+            "cloudfront.net",
+            "Amazon CloudFront Global",
+        ),
+        // Category 4: Microsoft & Azure
+        SpoofCandidatePair::new(
             "Microsoft",
             "204.79.197.200",
             443,
@@ -155,13 +187,19 @@ pub fn default_spoof_pairs() -> Vec<SpoofCandidatePair> {
             "Microsoft Portal Edge",
         ),
         SpoofCandidatePair::new(
-            "Amazon",
-            "13.224.0.1",
+            "Microsoft",
+            "13.107.21.200",
             443,
-            "aws.amazon.com",
-            "Amazon AWS CloudFront Edge",
+            "login.live.com",
+            "Microsoft Live Login Edge",
         ),
     ]
+}
+
+/// Automatically selects the best (lowest latency) relay destination and fake SNI.
+pub fn auto_select_best_relay_target(timeout: Duration) -> Option<(String, String)> {
+    let pairs = default_spoof_pairs();
+    best_spoof_pair(&pairs, timeout).map(|(pair, _)| (pair.connect_ip, pair.fake_sni))
 }
 
 /// Measures TCP connection establishment latency (ping) to a target IP and port.
@@ -460,10 +498,19 @@ mod tests {
     #[test]
     fn default_spoof_pairs_has_verified_entries() {
         let pairs = default_spoof_pairs();
-        assert!(pairs.len() >= 10);
+        assert!(pairs.len() >= 15);
         assert!(pairs.iter().any(|p| p.fake_sni == "hcaptcha.com"));
         assert!(pairs.iter().any(|p| p.fake_sni == "auth.vercel.com"));
         assert!(pairs.iter().any(|p| p.fake_sni == "static.cloudflareinsights.com"));
+        assert!(pairs.iter().any(|p| p.fake_sni == "pypi.org"));
+        assert!(pairs.iter().any(|p| p.fake_sni == "aws.amazon.com"));
+        assert!(pairs.iter().any(|p| p.fake_sni == "www.bing.com"));
+        assert!(pairs.iter().any(|p| p.fake_sni == "login.live.com"));
+    }
+
+    #[test]
+    fn auto_select_best_relay_target_runs() {
+        let _ = auto_select_best_relay_target(Duration::from_millis(10));
     }
 
     #[test]
