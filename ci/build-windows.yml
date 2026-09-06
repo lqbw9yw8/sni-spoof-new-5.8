@@ -1,0 +1,49 @@
+# Build dpi_guard.exe on GitHub-hosted Windows.
+# Copy to .github/workflows/build-windows.yml if the token can write that path:
+#   mkdir -p .github/workflows
+#   cp ci/build-windows.yml .github/workflows/build-windows.yml
+#
+# After a green run: Actions → this workflow → Artifacts → dpi_guard-windows.zip
+# The zip is the exe + example toml. It does NOT include WinDivert.dll/sys.
+
+name: build-windows-exe
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Release build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+
+      - name: Stage zip contents
+        shell: pwsh
+        run: |
+          $out = "dist"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item "target\x86_64-pc-windows-msvc\release\dpi_guard.exe" $out
+          Copy-Item "dpi_guard.toml.example" "$out\dpi_guard.toml.example"
+          Copy-Item "README.md" $out
+          Copy-Item "START_HERE.md" $out
+          @"
+          Put official WinDivert.dll + WinDivert64.sys next to dpi_guard.exe
+          (https://reqrypt.org/windivert.html). Then copy dpi_guard.toml.example
+          to dpi_guard.toml, set relay_connect_host to your DOMAIN (no ping),
+          and Run as administrator.
+          "@ | Set-Content -Encoding utf8 "$out\READ_ME_FIRST.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dpi_guard-windows
+          path: dist/
+          if-no-files-found: error
