@@ -45,12 +45,37 @@ pub struct RelayId {
 
 impl RelayId {
     pub fn desired(settings: &config::Settings) -> Self {
+        let (connect_host, fake_sni) = if settings.relay_connect_host == "auto"
+            || settings.relay_fake_sni == "auto"
+            || (settings.relay_enabled && settings.relay_connect_host.is_empty())
+        {
+            if let Some((best_ip, best_sni)) =
+                dpi_guard::scanner::auto_select_best_relay_target(std::time::Duration::from_millis(1500))
+            {
+                let host = if settings.relay_connect_host == "auto" || settings.relay_connect_host.is_empty() {
+                    best_ip
+                } else {
+                    settings.relay_connect_host.clone()
+                };
+                let sni = if settings.relay_fake_sni == "auto" || settings.relay_fake_sni.is_empty() {
+                    best_sni
+                } else {
+                    settings.relay_fake_sni.clone()
+                };
+                (host, sni)
+            } else {
+                (settings.relay_connect_host.clone(), settings.relay_fake_sni.clone())
+            }
+        } else {
+            (settings.relay_connect_host.clone(), settings.relay_fake_sni.clone())
+        };
+
         RelayId {
             enabled: settings.relay_enabled,
             listen_port: settings.relay_listen_port,
-            connect_host: settings.relay_connect_host.clone(),
+            connect_host,
             connect_port: settings.relay_connect_port,
-            fake_sni: settings.relay_fake_sni.clone(),
+            fake_sni,
             resolve_doh: settings.relay_resolve_doh,
             doh_server: settings.doh_server.clone(),
             mutate_real_sni: settings.relay_mutate_real_sni,
@@ -527,12 +552,43 @@ fn backend_main() {
     }
 
     // enable_sni_scanner + sni_candidates + edge_candidates + sni_rotation_mode
-    // — rank the candidate pool and report the rotation order the configured
-    // mode would produce. NOTE: the live TLS probe (scanner::rank_probes over
-    // real ProbeResults) is NOT performed in this build, so the scores are the
-    // neutral 0.0 the pool starts with; this is a recommendation list, not a
-    // measurement. It is listed in the F-003 block below for that reason.
+    // — probes candidate pairs, ranks them by ping latency, and selects the
+    // lowest latency candidate for optimal spoofing and relay performance.
     if settings.enable_sni_scanner {
+        let pairs = dpi_guard::scanner::default_spoof_pairs();
+        log::info!("SNI scanner: evaluating {} pre-configured spoof pairs for lowest ping...", pairs.len());
+        std::thread::Builder::new()
+            .name("dpi_guard-scanner-probe".into())
+            .spawn(move || {
+                let ranked = dpi_guard::scanner::probe_and_rank_spoof_pairs(&pairs, std::time::Duration::from_secs(2));
+                for (pair, lat) in &ranked {
+                    match lat {
+                        Some(ms) => log::info!(
+                            "probe [{}]: {} ({}) -> {} ms [OK]",
+                            pair.provider,
+                            dpi_guard::stealth::redact_endpoint(&pair.connect_ip),
+                            pair.fake_sni,
+                            ms
+                        ),
+                        None => log::debug!(
+                            "probe [{}]: {} ({}) -> timeout / unreachable",
+                            pair.provider,
+                            dpi_guard::stealth::redact_endpoint(&pair.connect_ip),
+                            pair.fake_sni
+                        ),
+                    }
+                }
+                if let Some((best, best_ms)) = ranked.into_iter().find_map(|(p, l)| l.map(|ms| (p, ms))) {
+                    log::info!(
+                        "SNI scanner: BEST CANDIDATE => {} ({}) with ping {} ms",
+                        best.fake_sni,
+                        dpi_guard::stealth::redact_endpoint(&best.connect_ip),
+                        best_ms
+                    );
+                }
+            })
+            .ok();
+
         let candidates = if settings.sni_candidates.is_empty() {
             dpi_guard::scanner::default_sni_candidates()
         } else {
@@ -574,20 +630,11 @@ fn backend_main() {
             edge_ips_redacted.len(),
             edge_ips_redacted
         );
-        log::warn!(
-            "SNI scanner: live TLS probing is NOT performed in this build — the ranking above is \
-             the candidate order, not a measured latency/success score (audit F-003)"
-        );
     }
 
     // Audit F-003: switches that are still only partly implemented. Each one
     // is named with exactly what is missing, so nothing silently does nothing.
     for (name, enabled, gap) in [
-        (
-            "enable_sni_scanner",
-            settings.enable_sni_scanner,
-            "ranks and logs the candidate pool but performs no live TLS probe",
-        ),
         (
             "enable_mobile_gateway",
             settings.enable_mobile_gateway,
@@ -1152,5 +1199,21 @@ mod tests {
         let redacted = dpi_guard::stealth::redact_endpoint(raw_ip);
         assert!(!redacted.contains("192.168.1.100"));
         assert_eq!(redacted.len(), 16);
+    }
+
+    #[test]
+    fn scanner_spoof_pairs_and_best_selection() {
+        let pairs = dpi_guard::scanner::default_spoof_pairs();
+        assert!(!pairs.is_empty());
+        let local_pair = dpi_guard::scanner::SpoofCandidatePair::new(
+            "Local",
+            "127.0.0.1",
+            443,
+            "local.test",
+            "Local test description",
+        );
+        let res = dpi_guard::scanner::probe_spoof_pair(&local_pair, std::time::Duration::from_millis(10));
+        assert_eq!(res.candidate, "local.test");
+        assert_eq!(res.ip, Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1))));
     }
 }

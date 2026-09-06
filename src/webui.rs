@@ -445,6 +445,51 @@ fn handle_conn(
                 ),
             }
         }
+        ("GET", "/api/scanner/pairs") => {
+            if !token_ok(&auth, token) {
+                return unauthorized(stream);
+            }
+            let pairs = crate::scanner::default_spoof_pairs();
+            let json = serde_json::to_string(&pairs).unwrap_or_else(|_| "[]".into());
+            respond(stream, 200, "application/json", &json)
+        }
+        ("POST", "/api/scanner/probe") | ("GET", "/api/scanner/probe") => {
+            if !token_ok(&auth, token) {
+                return unauthorized(stream);
+            }
+            let pairs = crate::scanner::default_spoof_pairs();
+            let ranked = crate::scanner::probe_and_rank_spoof_pairs(&pairs, std::time::Duration::from_millis(1500));
+            let best = crate::scanner::best_spoof_pair(&pairs, std::time::Duration::from_millis(1500));
+            let mut list_json = Vec::new();
+            for (p, lat) in &ranked {
+                list_json.push(format!(
+                    r#"{{"provider":"{}","connect_ip":"{}","port":{},"fake_sni":"{}","description":"{}","latency_ms":{}}}"#,
+                    json_escape(&p.provider),
+                    json_escape(&p.connect_ip),
+                    p.port,
+                    json_escape(&p.fake_sni),
+                    json_escape(&p.description),
+                    lat.map(|l| l.to_string()).unwrap_or_else(|| "null".into())
+                ));
+            }
+            let best_json = match best {
+                Some((b, ms)) => format!(
+                    r#"{{"provider":"{}","connect_ip":"{}","port":{},"fake_sni":"{}","latency_ms":{}}}"#,
+                    json_escape(&b.provider),
+                    json_escape(&b.connect_ip),
+                    b.port,
+                    json_escape(&b.fake_sni),
+                    ms
+                ),
+                None => "null".into(),
+            };
+            let out = format!(
+                r#"{{"ok":true,"best":{},"results":[{}]}}"#,
+                best_json,
+                list_json.join(",")
+            );
+            respond(stream, 200, "application/json", &out)
+        }
         // Read-only dry run: same validation as the save path, no disk
         // write. Lets the dashboard show the operator the exact server-side
         // rejection reason before committing a change.
