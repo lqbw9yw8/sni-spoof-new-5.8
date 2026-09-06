@@ -1,5 +1,5 @@
 {
-  "commit": "6d72d70",
+  "commit": "8ac6e9b",
   "modules": {
     "anti_fingerprint": {
       "lines": 192,
@@ -212,8 +212,8 @@
       "unsafe": false
     },
     "scanner": {
-      "lines": 633,
-      "tests": 12,
+      "lines": 691,
+      "tests": 13,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
@@ -456,7 +456,8 @@
       "stealth"
     ],
     "scanner": [
-      "error"
+      "error",
+      "fragmentation"
     ],
     "self_update": [
       "error"

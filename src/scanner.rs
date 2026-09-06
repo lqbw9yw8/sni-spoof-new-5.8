@@ -202,6 +202,52 @@ pub fn auto_select_best_relay_target(timeout: Duration) -> Option<(String, Strin
     best_spoof_pair(&pairs, timeout).map(|(pair, _)| (pair.connect_ip, pair.fake_sni))
 }
 
+use std::io::{Read, Write};
+
+/// Performs a real live TLS handshake probe to (ip, port) with the specified fake SNI.
+/// Sends a real ClientHello and expects a TLS ServerHello record (0x16).
+/// Returns (latency, tls_ok, error).
+pub fn probe_tls_handshake(
+    ip: IpAddr,
+    port: u16,
+    sni: &str,
+    timeout: Duration,
+) -> (Option<Duration>, bool, Option<String>) {
+    let addr = SocketAddr::new(ip, port);
+    let start = Instant::now();
+    let mut stream = match TcpStream::connect_timeout(&addr, timeout) {
+        Ok(s) => s,
+        Err(e) => return (None, false, Some(format!("TCP connect failed: {e}"))),
+    };
+
+    let tcp_latency = start.elapsed();
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
+
+    let client_hello = crate::fragmentation::encode_client_hello(sni);
+    if let Err(e) = stream.write_all(&client_hello) {
+        return (Some(tcp_latency), false, Some(format!("TLS ClientHello write failed: {e}")));
+    }
+
+    let mut resp_header = [0u8; 5];
+    match stream.read_exact(&mut resp_header) {
+        Ok(_) => {
+            let total_latency = start.elapsed();
+            // 0x16 is TLS Handshake Record (ServerHello / Certificate)
+            if resp_header[0] == 0x16 {
+                (Some(total_latency), true, None)
+            } else if resp_header[0] == 0x15 {
+                (Some(total_latency), false, Some("TLS Alert received from server".into()))
+            } else {
+                (Some(total_latency), false, Some(format!("Unexpected response header: 0x{:02X}", resp_header[0])))
+            }
+        }
+        Err(e) => {
+            (Some(tcp_latency), false, Some(format!("TLS ServerHello read error: {e}")))
+        }
+    }
+}
+
 /// Measures TCP connection establishment latency (ping) to a target IP and port.
 pub fn probe_tcp_latency(ip: IpAddr, port: u16, timeout: Duration) -> Option<Duration> {
     let addr = SocketAddr::new(ip, port);
@@ -212,30 +258,22 @@ pub fn probe_tcp_latency(ip: IpAddr, port: u16, timeout: Duration) -> Option<Dur
     }
 }
 
-/// Probes a single `SpoofCandidatePair` and returns a `ProbeResult`.
+/// Probes a single `SpoofCandidatePair` using real live TLS handshake and returns a `ProbeResult`.
 pub fn probe_spoof_pair(pair: &SpoofCandidatePair, timeout: Duration) -> ProbeResult {
     let parsed_ip = pair.connect_ip.parse::<IpAddr>().ok();
     match parsed_ip {
-        Some(ip) => match probe_tcp_latency(ip, pair.port, timeout) {
-            Some(dur) => ProbeResult {
+        Some(ip) => {
+            let (lat, tls_ok, err) = probe_tls_handshake(ip, pair.port, &pair.fake_sni, timeout);
+            ProbeResult {
                 candidate: pair.fake_sni.clone(),
                 ip: Some(ip),
-                success: true,
-                latency_ms: Some(dur.as_millis() as u64),
-                tls_ok: true,
-                cert_valid: true,
-                error: None,
-            },
-            None => ProbeResult {
-                candidate: pair.fake_sni.clone(),
-                ip: Some(ip),
-                success: false,
-                latency_ms: None,
-                tls_ok: false,
-                cert_valid: false,
-                error: Some("connection timed out".into()),
-            },
-        },
+                success: lat.is_some() && (tls_ok || err.is_none()),
+                latency_ms: lat.map(|d| d.as_millis() as u64),
+                tls_ok,
+                cert_valid: tls_ok,
+                error: err,
+            }
+        }
         None => ProbeResult {
             candidate: pair.fake_sni.clone(),
             ip: None,
@@ -248,27 +286,36 @@ pub fn probe_spoof_pair(pair: &SpoofCandidatePair, timeout: Duration) -> ProbeRe
     }
 }
 
-/// Probes a slice of `SpoofCandidatePair`s and returns them sorted by latency (lowest ping first).
+/// Probes a slice of `SpoofCandidatePair`s with live TLS handshakes and returns them sorted by priority:
+/// verified TLS responses with lowest ping first, then timeouts.
 pub fn probe_and_rank_spoof_pairs(
     pairs: &[SpoofCandidatePair],
     timeout: Duration,
 ) -> Vec<(SpoofCandidatePair, Option<u64>)> {
-    let mut results: Vec<(SpoofCandidatePair, Option<u64>)> = pairs
+    let mut results: Vec<(SpoofCandidatePair, ProbeResult)> = pairs
         .iter()
         .map(|pair| {
             let res = probe_spoof_pair(pair, timeout);
-            (pair.clone(), res.latency_ms)
+            (pair.clone(), res)
         })
         .collect();
 
-    results.sort_by(|a, b| match (a.1, b.1) {
-        (Some(la), Some(lb)) => la.cmp(&lb),
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (None, None) => std::cmp::Ordering::Equal,
+    results.sort_by(|a, b| {
+        let (_, res_a) = a;
+        let (_, res_b) = b;
+        match (res_a.tls_ok, res_b.tls_ok) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => match (res_a.latency_ms, res_b.latency_ms) {
+                (Some(la), Some(lb)) => la.cmp(&lb),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            },
+        }
     });
 
-    results
+    results.into_iter().map(|(p, r)| (p, r.latency_ms)).collect()
 }
 
 /// Finds the candidate pair with the lowest measured latency (ping).
@@ -293,9 +340,8 @@ pub fn select_lowest_latency_sni(
         let host_port = format!("{}:{}", sni, port);
         if let Ok(addrs) = host_port.to_socket_addrs() {
             for addr in addrs {
-                let start = Instant::now();
-                if TcpStream::connect_timeout(&addr, timeout).is_ok() {
-                    let lat = start.elapsed().as_millis() as u64;
+                if let Some(dur) = probe_tcp_latency(addr.ip(), addr.port(), timeout) {
+                    let lat = dur.as_millis() as u64;
                     match &best {
                         Some((_, min_lat)) if lat < *min_lat => {
                             best = Some((sni.clone(), lat));
@@ -511,6 +557,18 @@ mod tests {
     #[test]
     fn auto_select_best_relay_target_runs() {
         let _ = auto_select_best_relay_target(Duration::from_millis(10));
+    }
+
+    #[test]
+    fn probe_tls_handshake_handles_invalid_target() {
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 1)); // documentation IP
+        let (lat, tls_ok, err) = probe_tls_handshake(ip, 443, "example.com", Duration::from_millis(20));
+        assert!(!tls_ok);
+        assert!(lat.is_none());
+        assert!(err.is_some());
+
+        let tcp_lat = probe_tcp_latency(ip, 443, Duration::from_millis(20));
+        assert!(tcp_lat.is_none());
     }
 
     #[test]
