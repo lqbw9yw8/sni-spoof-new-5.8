@@ -1,5 +1,5 @@
 {
-  "commit": "7811307",
+  "commit": "369e54c",
   "modules": {
     "anti_fingerprint": {
       "lines": 192,
@@ -149,8 +149,8 @@
       "unsafe": false
     },
     "main": {
-      "lines": 1157,
-      "tests": 6,
+      "lines": 1195,
+      "tests": 7,
       "tag": null,
       "win": 2,
       "unsafe": false
@@ -212,8 +212,8 @@
       "unsafe": false
     },
     "scanner": {
-      "lines": 318,
-      "tests": 7,
+      "lines": 586,
+      "tests": 11,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
@@ -275,7 +275,7 @@
       "unsafe": false
     },
     "webui": {
-      "lines": 1081,
+      "lines": 1126,
       "tests": 17,
       "tag": "DONE",
       "win": 0,
@@ -311,6 +311,10 @@
     ],
     "quic": [
       "is_in_blindspot"
+    ],
+    "scanner": [
+      "select_lowest_latency_sni",
+      "rank_probes"
     ],
     "sni_mutations": [
       "disguise_sni_record"
@@ -481,7 +485,8 @@
       "config",
       "error",
       "integrity",
-      "pipeline"
+      "pipeline",
+      "scanner"
     ]
   }
 }
