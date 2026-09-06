@@ -1,0 +1,1422 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dpi_guard — داشبورد کنترل</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1015;
+    --bg2: #141821;
+    --bg3: #1b2029;
+    --line: #262c38;
+    --txt: #e7eaf0;
+    --mut: #8b93a5;
+    --acc: #4f9cf9;
+    --ok: #3ecf8e;
+    --warn: #f0b429;
+    --bad: #f26d6d;
+    --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.9 "Vazirmatn", "IRANSans", system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+  }
+  a { color: var(--acc); }
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: rgba(13,16,21,.96); backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 20px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: .2px; }
+  header h1 span { color: var(--mut); font-weight: 400; font-size: 13px; }
+  .sp { flex: 1; }
+  .pill {
+    font-size: 12px; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--bg2); color: var(--mut);
+    white-space: nowrap;
+  }
+  .pill.on { color: #9be7c4; border-color: #256b4a; background: #12331f; }
+  .pill.off { color: #ffb3b3; border-color: #6b2f2f; background: #2b1414; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px; }
+  .bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+  button {
+    background: var(--bg3); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 13px; cursor: pointer; font-size: 13px;
+    font-family: inherit; transition: background .12s, border-color .12s;
+  }
+  button:hover { background: #232937; border-color: #34405a; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: #1d4ed8; border-color: #1d4ed8; color: #fff; font-weight: 600; }
+  button.primary:hover { background: #2563eb; }
+  button.danger { background: #6b2323; border-color: #7d2b2b; color: #ffd9d9; }
+  button.on { background: #14532d; border-color: #1c7a45; color: #b6f0cd; }
+  button.tiny { padding: 3px 9px; font-size: 12px; }
+  input, select, textarea {
+    background: var(--bg); color: var(--txt); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 10px; font-size: 13px; font-family: inherit;
+    width: 100%;
+  }
+  textarea { font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--acc); }
+  input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--acc); cursor: pointer; }
+  input[type=number] { font-family: var(--mono); }
+  input[type=text].mono { font-family: var(--mono); }
+  .search { flex: 1; min-width: 200px; }
+
+  /* ---- top-level tab strip -------------------------------------------
+   * Each tab is a fully separate, always-present page; switching tabs
+   * only toggles `display`, it never rebuilds or re-measures anything
+   * else on the page, so the scroll position and layout of the rest of
+   * the dashboard can't jump around. This mirrors the desktop app's tab
+   * design (see native_gui.rs), which exists for the same reason. */
+  .tabbar {
+    display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 16px;
+    border-bottom: 1px solid var(--line); padding-bottom: 0;
+  }
+  .tabbtn {
+    background: transparent; border: 1px solid transparent; border-bottom: none;
+    border-radius: 8px 8px 0 0; padding: 9px 16px; font-size: 13px; color: var(--mut);
+  }
+  .tabbtn:hover { color: var(--txt); background: var(--bg2); }
+  .tabbtn.active { color: var(--txt); background: var(--bg2); border-color: var(--line); font-weight: 600; }
+  .tabpage { display: none; min-height: 300px; }
+  .tabpage.active { display: block; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); gap: 10px; margin-bottom: 18px; }
+  .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px; }
+  .card .k { color: var(--mut); font-size: 11px; letter-spacing: .04em; }
+  .card .v { font-size: 17px; font-weight: 600; margin-top: 2px; word-break: break-all; font-family: var(--mono); }
+  .card .v.sm { font-size: 13px; font-weight: 500; }
+  section.blk {
+    background: var(--bg2); border: 1px solid var(--line);
+    border-radius: 12px; margin-bottom: 14px; overflow: hidden;
+  }
+  section.blk > h2 {
+    margin: 0; padding: 12px 16px; font-size: 14px;
+    display: flex; align-items: center; gap: 10px; background: var(--bg3);
+    border-bottom: 1px solid var(--line);
+  }
+  section.blk > h2 .cnt { color: var(--mut); font-size: 12px; font-weight: 400; }
+  .rows { padding: 4px 0; }
+  .row {
+    display: grid; grid-template-columns: minmax(200px, 1fr) minmax(180px, 320px);
+    gap: 14px; padding: 9px 16px; align-items: start;
+    border-bottom: 1px solid rgba(38,44,56,.55);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row.dirty { background: rgba(79,156,249,.07); }
+  .row.dirty .lab::after {
+    content: "changed"; font-size: 10px; color: var(--acc);
+    border: 1px solid #2c5aa0; border-radius: 999px; padding: 0 6px; margin-inline-start: 7px;
+  }
+  .row.bad { background: rgba(242,109,109,.08); }
+  .row.warn { background: rgba(240,180,41,.07); }
+  .lab { font-weight: 600; font-size: 13px; display: flex; align-items: center; flex-wrap: wrap; }
+  .lab code {
+    font-family: var(--mono); font-size: 11px; color: var(--mut);
+    background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px;
+  }
+  .help { color: var(--mut); font-size: 12px; margin-top: 3px; }
+  .tag {
+    font-size: 10px; border-radius: 999px; padding: 0 7px; margin-inline-start: 6px;
+    border: 1px solid; white-space: nowrap;
+  }
+  .tag.danger { color: #ffb3b3; border-color: #6b2f2f; background: #2b1414; }
+  .tag.locked { color: var(--mut); border-color: var(--line); background: var(--bg); }
+  .err { color: var(--bad); font-size: 12px; margin-top: 4px; display: none; }
+  .row.bad .err { display: block; }
+  .row.warn .err { display: block; color: var(--warn); }
+  .ctl { display: flex; gap: 6px; align-items: center; }
+  .ctl.chk { justify-content: flex-start; }
+  .ctl .sw { display: flex; align-items: center; gap: 8px; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.t th, table.t td { text-align: start; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+  table.t th { color: var(--mut); font-weight: 500; font-size: 12px; }
+  table.t td.num { font-family: var(--mono); }
+  #msg { min-height: 20px; margin: 10px 0; font-size: 13px; }
+  #msg.ok { color: var(--ok); }
+  #msg.bad { color: var(--bad); }
+  #msg.warn { color: var(--warn); }
+  .note {
+    background: #1a1f2b; border: 1px solid var(--line); border-inline-start: 3px solid var(--acc);
+    border-radius: 8px; padding: 11px 14px; font-size: 12.5px; color: #c6cbd8; margin-bottom: 14px;
+  }
+  .note.warn { border-inline-start-color: var(--warn); }
+  .note b { color: var(--txt); }
+  .hide { display: none !important; }
+  .foot { color: var(--mut); font-size: 12px; padding: 18px 0 40px; text-align: center; }
+  #ovl {
+    position: fixed; inset: 0; background: rgba(6,8,12,.82); z-index: 50;
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  #ovl .box {
+    background: var(--bg2); border: 1px solid var(--line); border-radius: 14px;
+    padding: 22px; max-width: 430px; width: 100%;
+  }
+  #ovl h3 { margin: 0 0 8px; font-size: 16px; }
+  #ovl p { color: var(--mut); font-size: 12.5px; margin: 0 0 14px; }
+  .kbd { font-family: var(--mono); font-size: 11px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--acc); outline-offset: 1px;
+  }
+  @media (max-width: 700px) {
+    .row { grid-template-columns: 1fr; }
+    .cards { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    header h1 span { display: none; }
+  }
+  @media (max-width: 430px) {
+    main { padding: 12px 10px; }
+    header { padding: 10px 12px; gap: 8px; }
+    .cards { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+    .card { padding: 9px 10px; }
+    .card .v { font-size: 15px; }
+    .row { padding: 8px 12px; gap: 8px; }
+    .bar { gap: 6px; }
+    button { padding: 6px 10px; font-size: 12.5px; }
+    section.blk > h2 { padding: 10px 12px; font-size: 13px; }
+    .tabbtn { padding: 8px 11px; font-size: 12.5px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>dpi_guard <span>— داشبورد کنترل محلی</span></h1>
+  <span class="sp"></span>
+  <span class="pill" id="conn">در حال اتصال…</span>
+  <span class="pill" id="relaypill">رله: —</span>
+  <span class="pill" id="dirtypill" aria-live="polite">0 تغییر</span>
+  <button class="tiny" id="btn_token">توکن</button>
+  <button class="tiny" id="btn_export">خروجی گرفتن</button>
+  <button class="tiny" id="btn_import">وارد کردن</button>
+</header>
+
+<main>
+  <div id="msg" role="status" aria-live="polite"></div>
+
+  <div id="ovl" class="hide">
+    <div class="box">
+      <h3>توکن داشبورد</h3>
+      <p>
+        توکن در شروع برنامه در لاگ/کنسول چاپ می‌شود
+        (<span class="kbd">web UI token</span>).
+        اگر در کانفیگ تنظیم نشده باشد، برنامه یک توکن تصادفی ۱۲۸ بیتی می‌سازد.
+        توکن فقط روی <span class="kbd">127.0.0.1</span> ارسال می‌شود.
+      </p>
+      <input type="text" class="mono" id="tok" aria-label="توکن داشبورد" placeholder="Bearer token" autocomplete="off">
+      <div style="display:flex; gap:8px; margin-top:12px; justify-content:flex-end">
+        <button id="tok_clear">پاک کردن</button>
+        <button class="primary" id="tok_save">ذخیره</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <b>این VPN نیست.</b>
+    IP مقصد روی سیم دیده می‌شود؛ تنها هدف، فریب DPI با تزریق یک ClientHello جعلی
+    با SNI بی‌خطر است. کلاینت محلی را به
+    <b>127.0.0.1:<span id="qr_lport">40443</span></b> وصل کنید و SNI کلاینت را روی
+    <b>دامنهٔ واقعی</b> بگذارید (نه دامنهٔ جعلی). تغییرات با <b>ذخیره</b> در
+    <span class="kbd">dpi_guard.toml</span> نوشته می‌شوند و در حدود ۱ ثانیه
+    بارگذاری مجدد داغ می‌شوند.
+  </div>
+  <div class="note warn" id="dns_leak_note">
+    <b>نشتی DNS:</b>
+    مسدودسازی پورت ۵۳ با WFP در این build یک <b>stub</b> است — سیستم‌عامل هنوز می‌تواند UDP/53 بفرستد.
+    قوی‌ترین تنظیم این‌جا: <code>relay_connect_host</code> را یک <b>IP مستقیم</b> بگذارید.
+    اگر از v2rayN استفاده می‌کنید، DNS را <b>داخل خود v2rayN</b> تنظیم کنید (Basic DNS Settings):
+    Remote DNS = یک آدرس DoH مثل <span class="kbd">https://dns.adguard.com/dns-query</span>،
+    Bootstrap DNS = یک IP (مثلاً <span class="kbd">94.140.14.14</span>).
+    آن تب‌ها مال v2rayN هستند، نه این داشبورد — این صفحه فقط DoH خود رله را پوشش می‌دهد.
+  </div>
+
+  <div class="tabbar" id="tabbar"></div>
+
+  <!-- ================= نمای کلی ================= -->
+  <div class="tabpage" id="tab-overview">
+    <div class="bar" style="background:var(--bg2);padding:10px 14px;border-radius:10px;margin-bottom:12px;border:1px solid var(--line)">
+      <span style="font-weight:700;font-size:13px">⚡ اقدام سریع:</span>
+      <button class="tiny" id="qa_all_on" title="روشن‌کردن همهٔ تکنیک‌های ضد DPI">همه روشن</button>
+      <button class="tiny" id="qa_all_off" title="خاموش‌کردن تکنیک‌های اضافی">حالت ساده</button>
+      <button class="tiny" id="qa_stealth" title="پروفایل Stealth — کمترین تغییر">Stealth</button>
+      <button class="tiny" id="qa_aggressive" title="پروفایل Aggressive — همهٔ تکنیک‌ها">Aggressive</button>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--mut)" id="feature_count"></span>
+    </div>
+
+    <div class="cards" id="cards"></div>
+
+    <section class="blk">
+      <h2>وضعیت زنده و پروفایل جهش<span class="cnt" id="s_cnt"></span></h2>
+      <div class="rows">
+        <div class="row" style="grid-template-columns:1fr">
+          <div style="width:100%">
+            <div class="lab">پروفایل جهش <code>mutation_profile</code></div>
+            <div class="help">بلافاصله اعمال می‌شود (بدون نیاز به بارگذاری مجدد فایل).</div>
+            <div class="ctl" id="profiles" style="flex-wrap:wrap; margin-top:8px"></div>
+          </div>
+        </div>
+        <div class="row" style="grid-template-columns:1fr">
+          <div style="width:100%">
+            <div class="lab">امتیاز استراتژی <code>دامنه | تکنیک ← امتیاز</code></div>
+            <div style="max-height:230px; overflow:auto; margin-top:6px">
+              <table class="t"><thead><tr><th>کلید</th><th>امتیاز</th></tr></thead><tbody id="scores"></tbody></table>
+            </div>
+          </div>
+        </div>
+        <div class="row" style="grid-template-columns:1fr">
+          <div style="width:100%">
+            <div class="lab">SNIهای اخیر (هش‌شده) <code>recent_domains</code></div>
+            <div class="help">نام دامنهٔ خام هرگز نمایش داده نمی‌شود؛ فقط یک هش salted به‌ازای هر اجرا.</div>
+            <div id="domains" class="help" style="font-family:var(--mono)"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= پروکسی و SNI ================= -->
+  <div class="tabpage" id="tab-proxy">
+    <div class="bar">
+      <input class="search" type="text" id="q" aria-label="جست‌وجو در همهٔ تنظیمات" placeholder="جست‌وجو در همهٔ تنظیمات… (مثلاً sni، ttl، relay)">
+      <button id="btn_changed">فقط تغییرکرده‌ها</button>
+    </div>
+    <div id="fields-proxy"></div>
+  </div>
+
+  <!-- ================= ترافیک ================= -->
+  <div class="tabpage" id="tab-traffic">
+    <div id="fields-traffic"></div>
+  </div>
+
+  <!-- ================= اتصال ================= -->
+  <div class="tabpage" id="tab-connection">
+    <div id="fields-connection"></div>
+  </div>
+
+  <!-- ================= پیشرفته ================= -->
+  <div class="tabpage" id="tab-advanced">
+    <div id="fields-advanced"></div>
+  </div>
+
+  <!-- ================= TOML خام ================= -->
+  <div class="tabpage" id="tab-toml">
+    <div class="bar">
+      <button class="primary" id="btn_save">ذخیرهٔ تنظیمات</button>
+      <button id="btn_validate">اعتبارسنجی (بدون ذخیره)</button>
+      <button id="btn_revert">برگرداندن تغییرات</button>
+      <span class="sp"></span>
+      <button id="btn_live" class="on">به‌روزرسانی زنده: روشن</button>
+    </div>
+    <section class="blk">
+      <h2>ویرایشگر پیشرفتهٔ TOML (کل کانفیگ)<span class="cnt">توکن و پین‌ها redacted هستند</span></h2>
+      <div class="rows">
+        <div class="row" style="grid-template-columns:1fr">
+          <div style="width:100%">
+            <div class="help" style="margin-bottom:8px">
+              این متن روی تنظیمات فعلی merge می‌شود. مقدار خالی برای
+              <code>web_ui_token</code> و <code>win_divert_sha256</code> یعنی «تغییر نده» —
+              خالی‌گذاشتنشان توکن یا پین‌های شما را پاک نمی‌کند.
+            </div>
+            <textarea id="toml" rows="16" spellcheck="false"></textarea>
+            <div class="ctl" style="margin-top:8px">
+              <button id="btn_toml_load">بارگذاری از سرور</button>
+              <button id="btn_toml_validate">اعتبارسنجی</button>
+              <button class="primary" id="btn_toml_save">ذخیرهٔ این متن</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="bar" style="margin-top:4px" id="save-bar-bottom">
+    <button class="primary" id="btn_save2">ذخیرهٔ تنظیمات</button>
+    <button id="btn_validate2">اعتبارسنجی (بدون ذخیره)</button>
+    <button id="btn_revert2">برگرداندن تغییرات</button>
+    <span class="sp"></span>
+    <button id="btn_live2" class="on">به‌روزرسانی زنده: روشن</button>
+  </div>
+
+  <div class="foot">
+    داشبورد فقط روی <span class="kbd">127.0.0.1</span> است — هر مسیر <span class="kbd">/api/*</span> به توکن Bearer نیاز دارد.
+  </div>
+</main>
+
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------ *
+ * Schema — EVERY field of config::Settings is declared here.
+ * `src/webui.rs` has a unit test asserting this list matches the Rust
+ * struct 1:1, so a new Settings field cannot silently go uneditable.
+ * ------------------------------------------------------------------ */
+
+const TABS = [
+  { id: "overview",   title: "نمای کلی" },
+  { id: "proxy",       title: "پروکسی و SNI" },
+  { id: "traffic",     title: "ترافیک" },
+  { id: "connection",  title: "اتصال" },
+  { id: "advanced",    title: "پیشرفته" },
+  { id: "toml",        title: "TOML خام" },
+];
+
+/* Which settings-section ids appear on which tab. "toml" and "overview"
+ * render their own fixed content and don't pull from SECTIONS/FIELDS. */
+const TAB_OF_SECTION = {
+  core: "proxy", fp: "proxy", antifp: "proxy", isp: "proxy",
+  scope: "traffic", tls: "traffic", desync: "traffic",
+  relay: "connection", dns: "connection",
+  ui: "advanced", ops: "advanced", tools: "advanced",
+};
+
+const SECTIONS = [
+  { id: "core",    title: "جهش و ارسال اصلی" },
+  { id: "fp",      title: "اثر انگشت و استتار" },
+  { id: "antifp",  title: "ضد اثر انگشت پیشرفته" },
+  { id: "isp",     title: "پروفایل اپراتور و اسکنر" },
+  { id: "scope",   title: "محدودهٔ رهگیری پورت‌ها" },
+  { id: "tls",     title: "TLS / تکه‌سازی / ناهمگام‌سازی" },
+  { id: "desync",  title: "ناهمگام‌سازی پیشرفته (GoodbyeDPI/zapret)" },
+  { id: "relay",   title: "حالت رله (سبک patterniha)" },
+  { id: "dns",     title: "DNS و DoH (فقط رله — نه v2rayN)" },
+  { id: "ui",      title: "داشبورد وب" },
+  { id: "ops",     title: "کلید قطع، درایور و عملیات" },
+  { id: "tools",   title: "ابزارها و یکپارچه‌سازی" },
+];
+
+/* type: bool | int | str | enum | strlist | intlist
+ * danger: shows a warning tag + confirm on risky change
+ * secret: value is redacted by the API (write-only from the UI)      */
+const FIELDS = [
+  // ---- core ----
+  { k: "mutation_profile", s: "core", t: "enum", lbl: "پروفایل جهش",
+    opts: ["Stealth", "ChinaGfw", "RussiaDpi", "Aggressive", "ChinaRegional", "Henan"],
+    help: "مجموعهٔ تکنیک‌های جهش SNI. از دکمه‌های تب «نمای کلی» هم قابل تغییر است." },
+  { k: "decoy_ttl", s: "core", t: "int", lbl: "TTL پکت جعلی",
+    min: 1, max: 64, help: "باید آن‌قدر کم باشد که قبل از رسیدن به سرور واقعی بمیرد، ولی به DPI برسد. تعداد هاپ تا DPI را با tracert اندازه بگیرید." },
+  { k: "idle_timeout_secs", s: "core", t: "int", lbl: "تایم‌اوت بی‌کاری جریان (ثانیه)",
+    min: 1, max: 86400, help: "مدت نگه‌داشتن وضعیت یک جریان بدون ترافیک." },
+  { k: "fragment_chunk_size", s: "core", t: "int", lbl: "اندازهٔ تکهٔ تکه‌سازی",
+    min: 0, max: 16384, help: "۰ = ClientHello را TCP-segment نکن. مقدار ۱ ممنوع است (اثر انگشت‌پذیر). یا ۰، یا ۸ تا ۱۶۳۸۴." },
+  { k: "enable_decoys", s: "core", t: "bool", lbl: "پکت جعلی (decoy)",
+    help: "یک ClientHello جعلی با TTL محدود و checksum خراب تزریق می‌کند." },
+  { k: "enable_sni_fragmentation", s: "core", t: "bool", lbl: "تکه‌کردن SNI",
+    help: "فیلد SNI را تکه می‌کند تا DPI نتواند آن را بخواند." },
+  { k: "enable_combined_fragmentation", s: "core", t: "bool", lbl: "تکه‌سازی ترکیبی",
+    help: "چند روش تقسیم را در یک جریان ترکیب می‌کند." },
+  { k: "enable_http_host_tricks", s: "core", t: "bool", lbl: "ترفند HTTP Host",
+    help: "خط Host: را در ترافیک HTTP متن‌باز می‌شکند. فقط جریان‌های متن‌باز." },
+
+  // ---- scope ----
+  { k: "intercept_all_tcp", s: "scope", t: "bool", lbl: "رهگیری همهٔ پورت‌های TCP", danger: true,
+    help: "همهٔ TCP را به‌جز 22/53/3389 رهگیری می‌کند. خطرناک — برای تست. برای استفاده از فهرست پورت‌ها خاموشش کنید." },
+  { k: "intercept_all_udp", s: "scope", t: "bool", lbl: "رهگیری همهٔ پورت‌های UDP", danger: true,
+    help: "همهٔ UDP را به‌جز 22/53/3389 رهگیری می‌کند (برای QUIC). خطرناک — برای تست." },
+  { k: "intercept_ports", s: "scope", t: "intlist", lbl: "فهرست پورت‌های رهگیری‌شده",
+    placeholder: "443,8443,2053,2083,2087,2096,8080,80", max: 100,
+    help: "وقتی گزینه‌های بالا خاموش باشند استفاده می‌شود. خالی = فقط 443. پورت ۰ مجاز نیست؛ حداکثر ۱۰۰ مورد. 22/53/3389 همیشه نادیده گرفته می‌شوند." },
+
+  // ---- relay ----
+  { k: "relay_enabled", s: "relay", t: "bool", lbl: "فعال‌سازی رله",
+    help: "روی 127.0.0.1:<port> می‌نشیند و به یک مقصد ثابت رله می‌کند. کلاینت نمی‌تواند مقصد را عوض کند (این پروکسی باز نیست)." },
+  { k: "relay_listen_port", s: "relay", t: "int", lbl: "پورت شنود رله (هر عددی — همان را در v2rayN هم بگذار)",
+    min: 1, max: 65535, help: "هر پورت آزاد. همان عدد را در v2rayN بگذارید: Address=127.0.0.1، Port=همین عدد. نباید با پورت داشبورد یکی باشد. از 10808/10809/10853 (پورت‌های خود v2rayN) پرهیز کنید. 22/53/3389 قابل رهگیری نیستند." },
+  { k: "relay_connect_host", s: "relay", t: "str", lbl: "مقصد واقعی (دامنه یا IP)", mono: true,
+    placeholder: "server.example.com یا 1.2.3.4",
+    help: "دامنه کافی است — مثل patterniha خودش IP را از راه DoH (نه UDP/53) پیدا می‌کند. IP دستی لازم نیست. اگر IP بگذارید، برای این مقصد DNS اصلاً زده نمی‌شود. loopback/link-local/metadata رد می‌شوند." },
+  { k: "relay_connect_port", s: "relay", t: "int", lbl: "پورت مقصد واقعی",
+    min: 1, max: 65535, help: "پیش‌فرض ۴۴۳." },
+  { k: "relay_fake_sni", s: "relay", t: "str", lbl: "SNI جعلی (بی‌خطر)", mono: true,
+    placeholder: "www.microsoft.com",
+    help: "نامی که در ClientHello جعلی به DPI نشان داده می‌شود. فقط حرف/رقم/نقطه/خط تیره/زیرخط." },
+  { k: "relay_resolve_doh", s: "relay", t: "bool", lbl: "یافتن مقصد از راه DoH",
+    help: "اگر مقصد دامنه باشد، از راه DoH حل می‌شود (بدون DNS متن‌باز). IP مستقیم هیچ‌وقت DNS نمی‌زند." },
+  { k: "relay_mutate_real_sni", s: "relay", t: "bool", lbl: "جهش SNI واقعی هم",
+    help: "بعد از handshake جعلی، ClientHello واقعی هم از خط جهش عبور می‌کند." },
+  { k: "relay_emit_decoy", s: "relay", t: "bool", lbl: "ارسال پکت جعلی همراه تزریق",
+    help: "یک نسخهٔ TTL-محدود و checksum-خراب از ClientHello جعلی هم ارسال می‌کند." },
+  { k: "relay_require_inject", s: "relay", t: "bool", lbl: "fail-closed (الزام تزریق)", danger: true,
+    help: "اگر ClientHello جعلی ACK نشود، اتصال بسته می‌شود تا SNI واقعی هرگز روی سیم نرود. خاموش‌کردن این گزینه آن محافظت را حذف می‌کند." },
+
+  // ---- tls ----
+  { k: "enable_tls_record_fragmentation", s: "tls", t: "bool", lbl: "تکه‌سازی رکورد TLS",
+    help: "ClientHello را به چند رکورد TLS به اندازهٔ tls_record_chunk_size بایت تقسیم می‌کند." },
+  { k: "tls_record_chunk_size", s: "tls", t: "int", lbl: "اندازهٔ تکهٔ رکورد TLS (بایت)",
+    min: 0, max: 16384,
+    help: "۰ = استفاده از اندازهٔ تکهٔ تکه‌سازی. حداکثر ۱۶۳۸۴ (یک رکورد TLS)." },
+  { k: "enable_frag_by_sni", s: "tls", t: "bool", lbl: "برش دقیقاً قبل از SNI",
+    help: "مرز رکورد TLS را دقیقاً قبل از نام SNI می‌گذارد تا DPI نتواند آن را بخواند." },
+  { k: "autottl_scale_a1", s: "tls", t: "int", lbl: "AutoTTL مقیاس a1",
+    min: 0, max: 64, help: "کران پایین TTL مقیاس‌شده. ۰ = استفاده از تعداد هاپ یادگرفته‌شده بدون تغییر." },
+  { k: "autottl_scale_a2", s: "tls", t: "int", lbl: "AutoTTL مقیاس a2",
+    min: 0, max: 64, help: "کران بالای TTL مقیاس‌شده. حداکثر ۶۴؛ سرور فقط ۰ تا ۳۲ را می‌پذیرد." },
+  { k: "autottl_scale_max", s: "tls", t: "int", lbl: "AutoTTL سقف مقیاس",
+    min: 0, max: 64, help: "سقف قطعی که بعد از مقیاس‌دهی اعمال می‌شود. حداکثر ۶۴." },
+  { k: "enable_autottl", s: "tls", t: "bool", lbl: "AutoTTL",
+    help: "TTL پکت جعلی را از تعداد هاپ ورودی به این ماشین یاد می‌گیرد." },
+  { k: "autottl_delta", s: "tls", t: "int", lbl: "اختلاف AutoTTL",
+    min: 0, max: 32, help: "مقدار مثبت یک هاپ جلوتر می‌برد. سرور فقط ۰ تا ۳۲ را می‌پذیرد." },
+
+  // ---- fingerprint / stealth ----
+  { k: "enable_utls_fingerprint", s: "fp", t: "bool", lbl: "اثر انگشت uTLS (JA3/JA4)",
+    help: "اثر انگشت ClientHello را بر اساس پروفایل مرورگر می‌چرخاند." },
+  { k: "utls_browser", s: "fp", t: "enum", lbl: "مرورگر جعل‌شده",
+    opts: ["chrome", "firefox", "safari", "edge", "random"], help: "قالب اثر انگشت + GREASE." },
+  { k: "enable_ech_grease", s: "fp", t: "bool", lbl: "ECH GREASE",
+    help: "اکستنشن Encrypted Client Hello را به‌صورت GREASE، کنار SNI بیرونی اضافه می‌کند." },
+  { k: "enable_md5sig_fooling", s: "fp", t: "bool", lbl: "فول MD5SIG (گزینهٔ TCP 19)", danger: true,
+    help: "سبک zapret. روی بعضی سرورها اتصال را می‌شکند؛ فقط وقتی روشنش کنید که دلیلش را می‌دانید." },
+  { k: "enable_geedge_evasion", s: "fp", t: "bool", lbl: "دورزدن Geedge",
+    help: "padding اضافه، SNI به‌صورت IP مستقیم و ترفندهای مشابه." },
+  { k: "enable_sni_disguise", s: "fp", t: "bool", lbl: "استتار SNI",
+    help: "شکل واقعی فیلد SNI را پنهان می‌کند." },
+  { k: "fronting_benign_sni", s: "fp", t: "str", lbl: "SNI بی‌خطر برای fronting", mono: true,
+    placeholder: "www.microsoft.com (خالی = بدون fronting)",
+    help: "حداکثر ۲۵۳ نویسه؛ فقط حرف/رقم/نقطه/خط تیره/زیرخط." },
+  { k: "enable_swap_foolers", s: "fp", t: "bool", lbl: "فولر جابه‌جا (RST/SYN-ACK جعلی)", danger: true,
+    help: "پکت جعلی با مقصد جابه‌جاشده. ممکن است IDS/EDR علامتش بزند. پیش‌فرض خاموش." },
+  { k: "enable_quic_port_bypass", s: "fp", t: "bool", lbl: "دورزدن QUIC با تغییر پورت",
+    help: "پورت UDP جریان QUIC را جابه‌جا می‌کند تا از فیلتر پورت‌محور رد شود." },
+  { k: "quic_bypass_use_low_port", s: "fp", t: "bool", lbl: "QUIC: استفاده از پورت پایین",
+    help: "پورت جایگزین QUIC را از بازهٔ پایین انتخاب می‌کند." },
+
+  // ---- dns ----
+  { k: "doh_server", s: "dns", t: "str", lbl: "آدرس سرور DoH", mono: true,
+    placeholder: "https://1.1.1.1/dns-query",
+    help: "باید https:// باشد، بدون user:pass@ و هرگز loopback/metadata. IP مستقیم مرحلهٔ bootstrap را رد می‌کند." },
+  { k: "trusted_dns", s: "dns", t: "str", lbl: "سرور DNS مورد اعتماد (IP)", mono: true,
+    placeholder: "1.1.1.1 — خالی = خاموش",
+    help: "سرور DNS که پرس‌وجوها به آن هدایت می‌شوند. توجه: hijack DNS با WFP در این build یک stub است، پس این مقدار اعتبارسنجی می‌شود ولی روی سیم اعمال نمی‌شود. خالی‌گذاشتن، کلید را حذف می‌کند." },
+  { k: "rotate_ips", s: "dns", t: "strlist", lbl: "فهرست چرخش IP مقصد", mono: true,
+    placeholder: "1.1.1.1,1.0.0.1",
+    help: "توجه: پذیرفته و اعتبارسنجی می‌شود، ولی در این build روی سیم اعمال نمی‌شود. خالی = خاموش." },
+  { k: "sni_only", s: "dns", t: "strlist", lbl: "فقط این SNIها (allow-list)", mono: true,
+    placeholder: "*.example.com,keep.org",
+    help: "اگر خالی نباشد، جهش/تزریق فقط روی SNIهای منطبق اعمال می‌شود. الگو: دقیق یا *.example.com." },
+  { k: "sni_except", s: "dns", t: "strlist", lbl: "هرگز این SNIها (deny-list)", mono: true,
+    placeholder: "bank.example.com",
+    help: "این SNIها هرگز جهش/رله نمی‌شوند. deny بر allow اولویت دارد." },
+
+  // ---- web ui ----
+  { k: "enable_web_ui", s: "ui", t: "bool", lbl: "فعال‌سازی داشبورد وب", restart: true,
+    help: "فقط 127.0.0.1. برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "web_ui_port", s: "ui", t: "int", lbl: "پورت داشبورد", restart: true,
+    min: 1, max: 65535, help: "پیش‌فرض ۹۰۹۰. نباید با پورت رله یکی باشد. برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "web_ui_token", s: "ui", t: "str", lbl: "توکن داشبورد", restart: true, mono: true, secret: true,
+    placeholder: "۱۶ نویسه یا بیشتر — خالی = تغییر نده",
+    help: "سرور هرگز مقدار فعلی را برنمی‌گرداند (redacted). خالی‌گذاشتن، توکن فعلی را نگه می‌دارد. حداقل ۱۶ نویسهٔ ASCII قابل چاپ، بدون \" یا \\. توکن جدید فقط بعد از اجرای مجدد برنامه اعمال می‌شود." },
+
+  // ---- ops ----
+  { k: "enable_kill_switch", s: "ops", t: "bool", lbl: "کلید قطع (فقط آماده‌سازی)", restart: true, danger: true,
+    help: "دستور ساخته و پاک‌سازی می‌شود ولی هرگز خودکار اجرا نمی‌شود. فقط در لاگ چاپ می‌شود. آماده‌سازی فقط در شروع انجام می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "kill_switch_adapter", s: "ops", t: "str", lbl: "نام آداپتور شبکه", restart: true, mono: true,
+    placeholder: "Wi-Fi یا Ethernet",
+    help: "فقط حرف/رقم/فاصله/خط تیره/زیرخط، تا دستور قابل تزریق نباشد. وقتی کلید قطع روشن است الزامی است. فقط در شروع خوانده می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "win_divert_sha256", s: "ops", t: "strlist", lbl: "پین SHA-256 درایور WinDivert", restart: true, mono: true, secret: true,
+    placeholder: "۶۴ نویسهٔ هگز — خالی = تغییر نده",
+    help: "محافظت زنجیرهٔ تأمین: فقط درایوری بارگذاری می‌شود که با یکی از این هش‌ها مطابقت داشته باشد. راستی‌آزمایی فقط در شروع انجام می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  // ---- isp: ISP profile & scanner ----
+  { k: "isp_profile", s: "isp", t: "enum", lbl: "پروفایل اپراتور", restart: true,
+    opts: ["auto", "mci", "irancell", "russia", "china", "generic"],
+    help: "تنظیمات پیش‌فرض به‌تفکیک اپراتور. auto = بدون تغییر. ادغام پروفایل فقط در شروع انجام می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "enable_sni_scanner", s: "isp", t: "bool", lbl: "اسکنر SNI",
+    help: "در شروع، ترتیب پیشنهادی نامزدهای SNI/CDN را گزارش می‌دهد — رتبه‌بندی بدون پروب زنده (رجوع به F-003)." },
+  { k: "sni_candidates", s: "isp", t: "strlist", lbl: "فهرست نامزدهای SNI",
+    placeholder: "www.microsoft.com,www.apple.com",
+    help: "خالی = استفاده از فهرست پیش‌فرض داخلی." },
+  { k: "edge_candidates", s: "isp", t: "strlist", lbl: "IPهای لبهٔ CDN",
+    placeholder: "104.16.0.1,1.1.1.1",
+    help: "آدرس‌های CDN اضافی برای اسکن." },
+  { k: "sni_rotation_mode", s: "isp", t: "enum", lbl: "حالت چرخش SNI",
+    opts: ["round_robin", "weighted_random", "lru"],
+    help: "چگونگی انتخاب SNI از مجموعه. round_robin، weighted_random یا lru (کم‌کاربردترین)." },
+  // ---- antifp: Anti-fingerprint ----
+  { k: "enable_anti_fingerprint", s: "antifp", t: "bool", lbl: "فعال‌سازی ضد اثر انگشت",
+    help: "مجموعهٔ تکنیک‌های ضد اثر انگشت: زمان‌بندی، اندازهٔ پکت، IP-ID." },
+  { k: "injection_delay_min_ms", s: "antifp", t: "int", lbl: "حداقل تأخیر تزریق (ms)", restart: true,
+    min: 0, max: 1000, help: "حداقل jitter قبل از تزریق ClientHello جعلی. مقادیر فقط هنگام ساخت حلقهٔ capture خوانده می‌شوند؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "injection_delay_max_ms", s: "antifp", t: "int", lbl: "حداکثر تأخیر تزریق (ms)", restart: true,
+    min: 0, max: 5000, help: "حداکثر jitter. باید >= حداقل باشد. مقادیر فقط هنگام ساخت حلقهٔ capture خوانده می‌شوند؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "max_packet_padding", s: "antifp", t: "int", lbl: "حداکثر padding تصادفی (بایت)",
+    min: 0, max: 256, help: "۰ = خاموش. اندازهٔ پکت‌ها را تصادفی می‌کند." },
+  { k: "randomize_ip_id", s: "antifp", t: "bool", lbl: "تصادفی‌سازی IP-ID",
+    help: "فیلد ID هدر IPv4 را تصادفی می‌کند." },
+  { k: "randomize_packet_size", s: "antifp", t: "bool", lbl: "تصادفی‌سازی اندازهٔ پکت",
+    help: "از max_packet_padding استفاده می‌کند." },
+  { k: "enable_fake_with_sni", s: "antifp", t: "bool", lbl: "جعلی با SNI (تقلید مرورگر)",
+    help: "یک ClientHello جعلی می‌سازد که از مرورگر واقعی (Firefox/Chrome) تقلید می‌کند." },
+  { k: "fake_browser", s: "antifp", t: "enum", lbl: "مرورگر تقلیدشده",
+    opts: ["firefox", "chrome", "safari", "edge", "random"] },
+  // ---- desync: Advanced desync ----
+  { k: "enable_reverse_frag", s: "desync", t: "bool", lbl: "تکه‌سازی معکوس",
+    danger: true,
+    help: "سگمنت‌های TCP را با ترتیب معکوس می‌فرستد (GoodbyeDPI/zapret). ممکن است بعضی سرورها را بشکند." },
+  { k: "enable_wrong_seq", s: "desync", t: "bool", lbl: "wrong-seq (GoodbyeDPI)",
+    help: "شمارهٔ ترتیب پکت جعلی را بیرون از پنجرهٔ دریافت می‌گذارد تا سرور واقعی آن را بیندازد ولی DPI آن را بخواند. پیش‌فرض روشن: خاموش‌کردنش پکت جعلی را به یک پکت واقعی تبدیل می‌کند." },
+  { k: "enable_wrong_checksum", s: "desync", t: "bool", lbl: "wrong-checksum (GoodbyeDPI)",
+    help: "checksum لایهٔ ۴ پکت جعلی را خراب می‌کند تا استک مقصد آن را دور بیندازد. پیش‌فرض روشن." },
+  { k: "enable_oob_injection", s: "desync", t: "bool", lbl: "تزریق دادهٔ OOB (zapret)",
+    danger: true,
+    help: "تزریق دادهٔ out-of-band — ممکن است بعضی سرورها را بشکند." },
+  { k: "enable_adaptive_desync", s: "desync", t: "bool", lbl: "ناهمگام‌سازی تطبیقی",
+    help: "حالت ناهمگام‌سازی را برای هر اتصال انتخاب می‌کند، نه یک حالت ثابت." },
+  { k: "enable_hostdot", s: "desync", t: "bool", lbl: "نقطهٔ Host (zapret)",
+    help: "یک نقطهٔ اضافی بعد از نام هاست در هدر HTTP Host." },
+  { k: "max_payload_size", s: "desync", t: "int", lbl: "سقف اندازهٔ payload (بایت)",
+    min: 0, max: 65535, help: "پکت‌های بزرگ‌تر از این جهش نمی‌شوند. ۰ = نامحدود." },
+  { k: "fake_resend_count", s: "desync", t: "int", lbl: "تعداد ارسال مجدد پکت جعلی",
+    min: 1, max: 10, help: "پکت جعلی چند بار ارسال مجدد شود." },
+  { k: "ipset_hostlist", s: "desync", t: "strlist", lbl: "فهرست هاست (سبک zapret)",
+    placeholder: "example.com,*.example.org",
+    help: "فقط این هاست‌ها جهش می‌شوند. خالی = همه." },
+  // ---- tools: Integration tools ----
+  { k: "enable_self_update", s: "tools", t: "bool", lbl: "بررسی به‌روزرسانی در شروع", restart: true,
+    help: "در شروع یک بار از API ریلیز GitHub می‌پرسد و در لاگ می‌نویسد نسخهٔ جدیدتری هست یا نه. هرگز فایل را دانلود یا جایگزین نمی‌کند. این بررسی فقط در شروع اجرا می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "update_repo", s: "tools", t: "str", lbl: "مخزن به‌روزرسانی (owner/repo)", restart: true, mono: true,
+    placeholder: "owner/repo",
+    help: "مخزن GitHub برای بررسی به‌روزرسانی. باید owner/repo باشد، نه آدرس. فقط در شروع خوانده می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "enable_client_detect", s: "tools", t: "bool", lbl: "شناسایی کلاینت‌های پروکسی", restart: true,
+    help: "در شروع، در لاگ می‌نویسد کدام کلاینت‌های پروکسی شناخته‌شده (v2rayN، Xray، sing-box، ...) در حال اجرا هستند تا از پورت‌هایشان پرهیز شود. فقط در شروع اجرا می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "enable_youtube_warmup", s: "tools", t: "bool", lbl: "گرم‌کردن یوتیوب", restart: true,
+    help: "در شروع، کش DNS را برای آدرس‌های یوتیوب گرم می‌کند. فقط در شروع اجرا می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "enable_mobile_gateway", s: "tools", t: "bool", lbl: "گیت‌وی موبایل (اشتراک LAN)", restart: true,
+    danger: true,
+    help: "فقط گزارش می‌دهد (آدرس LAN و جدول ARP) و هیچ شنونده‌ای روی LAN باز نمی‌کند — رله همچنان فقط 127.0.0.1 است. فقط در شروع اجرا می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+  { k: "enable_proxy_cleanup", s: "tools", t: "bool", lbl: "بازگرداندن پروکسی ویندوز هنگام خروج", restart: true,
+    help: "هنگام خروج، تنظیمات پروکسی سیستم را بازنشانی می‌کند. وضعیت اولیه فقط در شروع ذخیره می‌شود؛ برای اعمال‌شدن نیاز به اجرای مجدد برنامه دارد." },
+];
+
+const PROFILES = ["Stealth", "ChinaGfw", "RussiaDpi", "Aggressive", "ChinaRegional", "Henan"];
+const LS_TOKEN = "dpi_guard_token";
+
+/* ---------------------------- utilities ---------------------------- */
+
+const $ = (id) => document.getElementById(id);
+const byKey = {};
+FIELDS.forEach((f) => { byKey[f.k] = f; });
+
+function esc(s) {
+  return String(s).replace(/[&<>"'`]/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;", "`": "&#96;" }[c]));
+}
+/** TOML basic-string literal. */
+function tstr(v) {
+  return '"' + String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t") + '"';
+}
+function msg(text, kind) {
+  const el = $("msg");
+  el.textContent = text || "";
+  el.className = kind || "";
+}
+function listVal(s) {
+  return String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
+}
+
+/* ------------------- validation (mirrors Settings::validate) ------------------- */
+
+const isIP = (s) => {
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(s)) return s.split(".").every((p) => +p <= 255);
+  return /^[0-9a-fA-F:]+$/.test(s) && s.includes(":");
+};
+const isHost = (s) => /^[A-Za-z0-9.-]+$/.test(s);
+const isSniChars = (s) => /^[A-Za-z0-9._-]+$/.test(s);
+const isPatChars = (s) => /^[A-Za-z0-9._*-]+$/.test(s);
+const isHex64 = (s) => /^[0-9a-fA-F]{64}$/.test(s);
+
+/** Returns an error string, or "" when the raw UI value is acceptable. */
+function validateField(f, raw) {
+  const s = String(raw == null ? "" : raw).trim();
+  if (f.t === "bool") return "";
+  if (f.t === "int") {
+    if (s === "") return "A number is required";
+    const n = Number(s);
+    if (!Number.isInteger(n)) return "Must be a whole number";
+    if (f.min != null && n < f.min) return "Min " + f.min;
+    if (f.max != null && n > f.max) return "Max " + f.max;
+    if (f.k === "fragment_chunk_size" && n !== 0 && n < 8) return "Either 0, or 8-16384";
+    return "";
+  }
+  if (f.t === "enum") return f.opts.includes(s) ? "" : "Must be one of the allowed values";
+  if (f.t === "intlist") {
+    const items = listVal(s);
+    if (f.max && items.length > f.max) return "Max " + f.max + " entries";
+    for (const it of items) {
+      const n = Number(it);
+      if (!Number.isInteger(n) || n < 1 || n > 65535) return "Invalid port: " + it;
+    }
+    return "";
+  }
+  if (f.t === "strlist") {
+    const items = listVal(s);
+    for (const it of items) {
+      if (f.k === "win_divert_sha256" && !isHex64(it)) return "Each pin must be exactly 64 hex characters";
+      if (f.k === "rotate_ips" && !isIP(it)) return "Invalid IP: " + it;
+      if ((f.k === "sni_only" || f.k === "sni_except") && (!isPatChars(it) || it.length > 253))
+        return "Invalid pattern: " + it;
+    }
+    return "";
+  }
+  // string-ish
+  if (s === "") {
+    if (f.k === "relay_connect_host" || f.k === "relay_fake_sni") return "";
+    if (f.k === "kill_switch_adapter") return "";
+    if (f.k === "web_ui_token" || f.k === "win_divert_sha256") return "";
+    return "";
+  }
+  switch (f.k) {
+    case "relay_connect_host":
+      if (!isIP(s) && !isHost(s)) return "Must be a valid IP or hostname";
+      if (/^(127\.|::1$|169\.254\.169\.254$|localhost)/i.test(s)) return "loopback/metadata is not allowed";
+      return "";
+    case "relay_fake_sni":
+    case "fronting_benign_sni":
+      if (s.length > 253) return "253 characters max";
+      return isSniChars(s) ? "" : "Letters/digits/dot/hyphen/underscore only";
+    case "doh_server": {
+      // Mirrors netguard::validate_doh_url: https only, no userinfo, and
+      // never a loopback/link-local/metadata host.
+      if (!s.startsWith("https://")) return "Must start with https://";
+      const rest = s.slice("https://".length);
+      const cut = rest.search(/[/?#]/);
+      const authority = cut < 0 ? rest : rest.slice(0, cut);
+      if (!authority || /\s/.test(authority)) return "Invalid host";
+      if (authority.includes("@")) return "userinfo (user:pass@) is not allowed";
+      let host = authority;
+      if (host.startsWith("[")) {
+        const close = host.indexOf("]");
+        if (close < 0) return "Incomplete IPv6 address";
+        host = host.slice(1, close);
+      } else {
+        host = host.split(":")[0];
+      }
+      if (!host) return "Host is empty";
+      const hl = host.toLowerCase().replace(/\.+$/, "");
+      const bad = /^127\./.test(hl) || hl === "::1" || /^169\.254\./.test(hl) ||
+        hl === "0.0.0.0" || /^2[2-3]\d\./.test(hl) ||
+        hl === "localhost" || hl.endsWith(".localhost") || hl === "local" ||
+        hl.endsWith(".local") || hl === "internal" || hl.endsWith(".internal");
+      if (bad) return "loopback/link-local/metadata is not allowed";
+      return "";
+    }
+    case "trusted_dns":
+      return isIP(s) ? "" : "Must be a valid IP";
+    case "kill_switch_adapter":
+      return /^[A-Za-z0-9 _-]+$/.test(s) ? "" : "Letters/digits/space/hyphen/underscore only";
+    case "web_ui_token":
+      if (s.length < 16) return "16 characters minimum";
+      // eslint-disable-next-line no-control-regex
+      if (!/^[\x21-\x7e]+$/.test(s) || s.includes('"') || s.includes("\\"))
+        return 'Printable ASCII, no " or \\';
+      return "";
+    default:
+      return "";
+  }
+}
+
+/**
+ * Cross-field rules. `errs` are things Settings::validate() would reject
+ * (they block Save); `warns` are legal-but-risky states that must never
+ * silently disable the Save button.
+ */
+function crossCheck(values) {
+  const errs = {};
+  const warns = {};
+  const relayOn = values.relay_enabled === "true";
+  if (relayOn) {
+    if (!String(values.relay_connect_host || "").trim())
+      errs.relay_connect_host = "Required when the relay is on";
+    if (!String(values.relay_fake_sni || "").trim())
+      errs.relay_fake_sni = "Required when the relay is on";
+  }
+  if (values.enable_kill_switch === "true" && !String(values.kill_switch_adapter || "").trim())
+    errs.kill_switch_adapter = "Required when the kill switch is on";
+  if (values.enable_web_ui === "true" && relayOn &&
+      values.relay_listen_port === values.web_ui_port)
+    errs.relay_listen_port = "Conflicts with the dashboard port";
+  if (relayOn && ["10808", "10809", "10853"].indexOf(String(values.relay_listen_port)) >= 0)
+    warns.relay_listen_port = "This port belongs to v2rayN itself; one of the two programs may fail to bind. Pick a different port unless you've intentionally closed v2rayN";
+  if (relayOn && values.relay_require_inject === "false")
+    warns.relay_require_inject = "Warning: fail-closed is off — if injection fails, the real SNI will leak";
+  if (values.intercept_all_tcp === "true" && values.intercept_all_udp === "true")
+    warns.intercept_all_tcp = "Warning: all TCP+UDP traffic except 22/53/3389 will be intercepted";
+  if (values.enable_swap_foolers === "true")
+    warns.enable_swap_foolers = "Warning: fake packet with a swapped endpoint; IDS/EDR may flag it";
+  if (values.enable_md5sig_fooling === "true")
+    warns.enable_md5sig_fooling = "Warning: breaks the connection on some servers";
+  return { errs, warns };
+}
+
+/* ------------------------------ rendering ------------------------------ */
+
+const state = {
+  baseline: {},        // key -> UI string, as loaded from the server
+  current: {},         // key -> UI string, live in the form
+  errors: {},          // key -> blocking error message
+  touched: new Set(),  // keys the operator has edited in this session
+  loaded: false,       // first /api/config has not landed yet
+  onlyDirty: false,
+  live: true,
+  tab: "overview",
+  cardsBuilt: false,
+};
+
+function uiFromConfig(c, f) {
+  if (f.t === "bool") return c[f.k] ? "true" : "false";
+  if (f.t === "intlist") return (c[f.k] || []).join(",");
+  if (f.t === "strlist") return (c[f.k] || []).join(",");
+  const v = c[f.k];
+  return v == null ? "" : String(v);
+}
+
+function controlHtml(f) {
+  const id = "f_" + f.k;
+  const al = ' aria-label="' + esc(f.lbl + " (" + f.k + ")") + '"' +
+    ' aria-describedby="e_' + esc(f.k) + '"';
+  if (f.t === "bool") {
+    return '<div class="ctl chk"><label class="sw">' +
+      '<input type="checkbox" id="' + id + '" data-k="' + f.k + '"' + al + '>' +
+      '<span id="' + id + '_lbl" class="help">off</span></label></div>';
+  }
+  if (f.t === "enum") {
+    return '<select id="' + id + '" data-k="' + f.k + '"' + al + '>' +
+      f.opts.map((o) => '<option value="' + esc(o) + '">' + esc(o) + "</option>").join("") +
+      "</select>";
+  }
+  const type = f.t === "int" ? "number" : "text";
+  const attrs = (f.min != null ? ' min="' + f.min + '"' : "") +
+                (f.max != null && f.t === "int" ? ' max="' + f.max + '"' : "");
+  return '<input type="' + type + '" id="' + id + '" data-k="' + f.k + '"' + attrs + al +
+    (f.mono ? ' class="mono"' : "") +
+    (f.placeholder ? ' placeholder="' + esc(f.placeholder) + '"' : "") +
+    ' autocomplete="off" spellcheck="false">';
+}
+
+/* Build the tab bar once. */
+function renderTabBar() {
+  const bar = $("tabbar");
+  bar.innerHTML = TABS.map((t) =>
+    '<button class="tabbtn' + (t.id === state.tab ? " active" : "") + '" data-tab="' + t.id + '">' +
+    esc(t.title) + "</button>").join("");
+  bar.querySelectorAll(".tabbtn").forEach((b) => {
+    b.addEventListener("click", () => setTab(b.dataset.tab));
+  });
+}
+
+function setTab(id) {
+  state.tab = id;
+  document.querySelectorAll(".tabbtn").forEach((b) => b.classList.toggle("active", b.dataset.tab === id));
+  document.querySelectorAll(".tabpage").forEach((p) => p.classList.toggle("active", p.id === "tab-" + id));
+}
+
+/* Render every settings section, once, into its owning tab's container.
+ * Sections are always expanded (no accordion) — the tab strip is the only
+ * thing that changes what's visible, so nothing here ever resizes on its
+ * own between polls. */
+function renderFields() {
+  const hosts = {};
+  for (const t of TABS) {
+    const el = $("fields-" + t.id);
+    if (el) hosts[t.id] = el;
+  }
+  for (const sec of SECTIONS) {
+    const fs = FIELDS.filter((f) => f.s === sec.id);
+    if (!fs.length) continue;
+    const host = hosts[TAB_OF_SECTION[sec.id]];
+    if (!host) continue;
+    const el = document.createElement("section");
+    el.className = "blk";
+    el.dataset.sec = sec.id;
+    const intro = sec.id === "dns"
+      ? '<div class="rows"><div class="row" style="grid-template-columns:1fr"><div>' +
+        '<div class="lab">This is not v2rayN\'s DNS settings</div>' +
+        '<div class="help">The Basic / Advanced / V2ray Custom / sing-box Custom tabs stay in the client. ' +
+        'Domestic DNS, Proxy Target Strategy, Parallel Query, and Happy Eyeballs don\'t exist here because this crate isn\'t a DNS router. ' +
+        'Port 53 is never intercepted. The DoH cache always serves stale answers for up to 6 hours (MAX_STALE) — it has no separate key. ' +
+        'Only A records (IPv4) are queried.</div></div></div></div>'
+      : "";
+    el.innerHTML =
+      "<h2>" + esc(sec.title) + '<span class="cnt">' + fs.length + " option" + (fs.length === 1 ? "" : "s") + "</span></h2>" +
+      intro + '<div class="rows">' +
+      fs.map((f) => {
+        const tags = (f.danger ? '<span class="tag danger">risky</span>' : "") +
+          (f.secret ? '<span class="tag locked">write-only</span>' : "") +
+          (f.restart ? '<span class="tag locked" title="این تنظیم فقط بعد از اجرای مجدد برنامه اعمال می‌شود">نیاز به ری‌استارت</span>' : "");
+        return '<div class="row" data-k="' + f.k + '">' +
+          '<div><div class="lab">' + esc(f.lbl) + " " + tags +
+          ' <code>' + esc(f.k) + "</code></div>" +
+          '<div class="help">' + esc(f.help || "") + "</div>" +
+          '<div class="err" id="e_' + f.k + '"></div></div>' +
+          "<div>" + controlHtml(f) + "</div></div>";
+      }).join("") + "</div>";
+    host.appendChild(el);
+  }
+  document.querySelectorAll("input,select").forEach((inp) => {
+    const k = inp.dataset.k;
+    if (!k) return;
+    const ev = inp.type === "checkbox" ? "change" : "input";
+    inp.addEventListener(ev, () => {
+      const f = byKey[k];
+      const val = inp.type === "checkbox" ? (inp.checked ? "true" : "false") : inp.value;
+      state.current[k] = val;
+      if (f.danger) {
+        if (k === "relay_require_inject" && val === "false" &&
+            !confirm("Turn fail-closed off? If injection fails in this mode, your real SNI will go out on the wire. Continue?")) {
+          inp.checked = true; state.current[k] = "true"; return;
+        }
+        if ((k === "intercept_all_tcp" || k === "intercept_all_udp") && val === "true" &&
+            !confirm("All " + (k === "intercept_all_tcp" ? "TCP" : "UDP") +
+                     " ports (except 22/53/3389) will be intercepted. Continue?")) {
+          inp.checked = false; state.current[k] = "false"; return;
+        }
+        if (k === "enable_swap_foolers" && val === "true" &&
+            !confirm("This builds a fake RST/SYN-ACK with a swapped endpoint; IDS/EDR may flag it. Continue?")) {
+          inp.checked = false; state.current[k] = "false"; return;
+        }
+        if (k === "enable_reverse_frag" && val === "true" &&
+            !confirm("TCP segments will be sent in reverse order. May break some servers. Continue?")) {
+          inp.checked = false; state.current[k] = "false"; return;
+        }
+        if (k === "enable_oob_injection" && val === "true" &&
+            !confirm("Out-of-band data will be injected. May break some servers. Continue?")) {
+          inp.checked = false; state.current[k] = "false"; return;
+        }
+      }
+      state.touched.add(k);
+      refreshAllRows();
+      updateDirtyPill();
+    });
+  });
+}
+
+function setControl(f, val) {
+  const el = $("f_" + f.k);
+  if (!el) return;
+  if (f.t === "bool") el.checked = val === "true";
+  else el.value = val == null ? "" : val;
+}
+
+/**
+ * Recompute per-field + cross-field state for every row and repaint it.
+ * Errors (server would reject) block Save; warnings never do.
+ */
+function refreshAllRows() {
+  const { errs, warns } = crossCheck(state.current);
+  for (const f of FIELDS) {
+    const val = state.current[f.k];
+    let err = validateField(f, val);
+    if (!err && errs[f.k]) err = errs[f.k];
+    const warn = err ? "" : (warns[f.k] || "");
+    state.errors[f.k] = err;
+    const eEl = $("e_" + f.k);
+    if (eEl) eEl.textContent = err || warn;
+    const ctl = $("f_" + f.k);
+    if (ctl) ctl.setAttribute("aria-invalid", err ? "true" : "false");
+    const row = document.querySelector('.row[data-k="' + f.k + '"]');
+    if (row) {
+      row.classList.toggle("bad", !!err);
+      row.classList.toggle("warn", !err && !!warn);
+      row.classList.toggle("dirty", !err && val !== state.baseline[f.k]);
+    }
+    if (f.t === "bool") {
+      const lbl = $("f_" + f.k + "_lbl");
+      if (lbl) lbl.textContent = val === "true" ? "on" : "off";
+    }
+  }
+  applyFilter();
+}
+
+/** Keys whose form value differs from what the server last reported. */
+function dirtyKeys() {
+  return FIELDS.filter((f) => state.current[f.k] !== state.baseline[f.k]).map((f) => f.k);
+}
+
+function blockingErrors() {
+  return FIELDS.filter((f) => !!state.errors[f.k]);
+}
+
+function updateDirtyPill() {
+  const n = dirtyKeys().length;
+  const bad = blockingErrors().length;
+  $("dirtypill").textContent = n + " تغییر" + (bad ? " · " + bad + " خطا" : "");
+  $("dirtypill").className = "pill" + (bad ? " off" : n ? " on" : "");
+  ["btn_save", "btn_save2"].forEach((id) => { const b = $(id); if (b) b.disabled = n === 0 || bad > 0; });
+}
+
+function applyFilter() {
+  const q = ($("q") ? $("q").value : "").trim().toLowerCase();
+  for (const sec of SECTIONS) {
+    const blk = document.querySelector('section[data-sec="' + sec.id + '"]');
+    if (!blk) continue;
+    let shown = 0;
+    for (const f of FIELDS.filter((x) => x.s === sec.id)) {
+      const row = blk.querySelector('.row[data-k="' + f.k + '"]');
+      if (!row) continue;
+      const dirty = state.current[f.k] !== state.baseline[f.k];
+      const hay = (f.k + " " + f.lbl + " " + (f.help || "")).toLowerCase();
+      let ok = true;
+      if (q && !hay.includes(q)) ok = false;
+      if (state.onlyDirty && !dirty) ok = false;
+      row.classList.toggle("hide", !ok);
+      if (ok) shown++;
+    }
+    blk.classList.toggle("hide", shown === 0);
+  }
+}
+
+/* --------------------------- TOML generation --------------------------- */
+
+/** Partial TOML containing only the keys that differ from the baseline. */
+function buildPartialToml(keys) {
+  const out = [];
+  for (const k of keys) {
+    const f = byKey[k];
+    if (!f) continue;
+    const raw = String(state.current[k] == null ? "" : state.current[k]).trim();
+    if (f.secret && raw === "") continue;          // redacted => "leave as-is"
+    if (f.t === "bool") { out.push(k + " = " + (raw === "true")); continue; }
+    if (f.t === "int") { out.push(k + " = " + Number(raw)); continue; }
+    if (f.t === "enum") { out.push(k + " = " + tstr(raw)); continue; }
+    if (f.t === "intlist") {
+      out.push(k + " = [" + listVal(raw).map((x) => Number(x)).join(", ") + "]");
+      continue;
+    }
+    if (f.t === "strlist") {
+      out.push(k + " = [" + listVal(raw).map(tstr).join(", ") + "]");
+      continue;
+    }
+    out.push(k + " = " + tstr(raw));
+  }
+  return out.join("\n") + (out.length ? "\n" : "");
+}
+
+/* ------------------------------- API ------------------------------- */
+
+function getToken() { return localStorage.getItem(LS_TOKEN) || ""; }
+function setToken(t) {
+  if (t) localStorage.setItem(LS_TOKEN, t); else localStorage.removeItem(LS_TOKEN);
+}
+
+async function api(path, opts) {
+  opts = opts || {};
+  const headers = Object.assign({ Authorization: "Bearer " + getToken() }, opts.headers || {});
+  const res = await fetch(path, Object.assign({}, opts, { headers }));
+  if (res.status === 401) {
+    setToken("");
+    $("ovl").classList.remove("hide");
+    throw new Error("401 — توکن نامعتبر");
+  }
+  const ct = res.headers.get("content-type") || "";
+  const text = await res.text();
+  if (ct.includes("json")) { try { return JSON.parse(text); } catch (e) { /* fall through */ } }
+  return text;
+}
+
+async function loadConfig(quiet) {
+  const c = await api("/api/config");
+  if (!c || typeof c !== "object") throw new Error("Invalid /api/config response");
+  for (const f of FIELDS) {
+    // Secret fields are redacted by the server: never overwrite what the
+    // operator has already typed in this session.
+    if (f.secret && state.current[f.k] != null && state.current[f.k] !== "") continue;
+    const v = uiFromConfig(c, f);
+    state.baseline[f.k] = v;
+    // Before the first load, or for a field the operator has not touched,
+    // the server is the source of truth. A field they *are* editing keeps
+    // its in-progress value so a background refresh cannot eat it.
+    if (!state.loaded || !state.touched.has(f.k)) state.current[f.k] = v;
+    setControl(f, state.current[f.k]);
+  }
+  state.loaded = true;
+  refreshAllRows();
+  updateDirtyPill();
+  $("qr_lport").textContent = state.current.relay_listen_port || "40443";
+  if (!quiet) msg("");
+  return c;
+}
+
+async function postConfig(tomlText) {
+  const r = await api("/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: tomlText
+  });
+  if (r && r.error) { msg("خطای سرور: " + r.error, "bad"); return false; }
+  msg((r && r.message) || "ذخیره شد — بارگذاری مجدد داغ تا حدود ۱ ثانیه اعمال می‌شود", "ok");
+  return true;
+}
+
+/** True when any of `keys` is flagged restart-required in the schema. */
+function needsRestart(keys) {
+  return keys.some((k) => byKey[k] && byKey[k].restart);
+}
+
+/* ------------------------------ status ------------------------------ */
+
+function badge(on) {
+  return on ? '<span class="pill on">on</span>' : '<span class="pill off">off</span>';
+}
+
+/* Persian uptime, ASCII digits: "45 ثانیه", "12 دقیقه", "1 ساعت و 2 دقیقه".
+ * The digits stay ASCII on purpose — the card values are also read by
+ * uitest/test-status.mjs, and Persian-Indic digits would silently change
+ * every number a log-scraping operator greps for. */
+function fmtUptime(sec) {
+  sec = Number(sec) || 0;
+  if (sec < 60) return sec + " ثانیه";
+  if (sec < 3600) return Math.floor(sec / 60) + " دقیقه";
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  return h + " ساعت" + (m ? " و " + m + " دقیقه" : "");
+}
+
+/* Fixed card list — built once, then only the value text is updated on
+ * each poll. This is the fix for the layout "jumping": the old code
+ * replaced the entire #cards innerHTML every 4 seconds, and because the
+ * grid's row count/wrapping depends on the text length of live numbers,
+ * that periodically reflowed the whole page underneath it. Same DOM
+ * nodes every tick = no reflow. */
+const CARD_DEFS = [
+  { id: "profile", label: "پروفایل", small: true, get: (s) => esc(s.mutation_profile || "—") },
+  { id: "isp", label: "اپراتور", small: true, get: (s) => esc(s.isp_profile || "auto") },
+  { id: "processed", label: "پکت رهگیری‌شده", get: (s) => esc(s.processed_packets) },
+  { id: "mutated", label: "پکت جهش‌یافته", get: (s) => esc(s.mutated_packets != null ? s.mutated_packets : 0) },
+  { id: "uptime", label: "مدت کارکرد", small: true, get: (s) => esc(fmtUptime(s.uptime_secs)) },
+  { id: "doh", label: "DoH رله", small: true, get: (s) => esc(s.doh_state || "—") },
+  { id: "handles", label: "هندل درایور", small: true, get: (s) =>
+    esc((s.driver_handles_live ? 1 : 0) + " فعال + " + (s.driver_handles_retired != null ? s.driver_handles_retired : 0) + " بازنشسته") },
+  { id: "ttl", label: "TTL پکت جعلی", get: (s) => esc(s.decoy_ttl) },
+  { id: "ports", label: "پورت‌های رهگیری‌شده", small: true, get: (s) => esc((s.intercept_ports || []).join(",") || "همه") },
+  { id: "chunk", label: "اندازهٔ تکه", get: (s) => esc(s.fragment_chunk_size) },
+  { id: "timeout", label: "تایم‌اوت (ثانیه)", get: (s) => esc(s.idle_timeout_secs) },
+  { id: "decoys", label: "پکت جعلی", get: (s) => badge(s.enable_decoys) },
+  { id: "snifrag", label: "تکه‌کردن SNI", get: (s) => badge(s.enable_sni_fragmentation) },
+  { id: "quic", label: "دورزدن QUIC", get: (s) => badge(s.enable_quic_port_bypass) },
+  { id: "utls", label: "uTLS", get: (s) => badge(s.enable_utls_fingerprint) },
+  { id: "ech", label: "ECH GREASE", get: (s) => badge(s.enable_ech_grease) },
+  { id: "disguise", label: "استتار SNI", get: (s) => badge(s.enable_sni_disguise) },
+  { id: "swap", label: "فولر جابه‌جا", get: (s) => badge(s.enable_swap_foolers) },
+  { id: "kill", label: "کلید قطع", get: (s) => badge(s.enable_kill_switch) },
+  { id: "failclosed", label: "fail-closed", get: (s) => badge(s.relay_require_inject) },
+  { id: "fronting", label: "fronting", small: true, get: (s) => esc(s.fronting_benign_sni || "—") },
+  { id: "antifp", label: "ضد اثر انگشت", get: (s) => badge(s.enable_anti_fingerprint) },
+  { id: "revfrag", label: "تکه‌سازی معکوس", get: (s) => badge(s.enable_reverse_frag) },
+  { id: "wrongseq", label: "wrong-seq", get: (s) => badge(s.enable_wrong_seq) },
+  { id: "wrongchk", label: "wrong-chksum", get: (s) => badge(s.enable_wrong_checksum) },
+  { id: "oob", label: "تزریق OOB", get: (s) => badge(s.enable_oob_injection) },
+  { id: "hostdot", label: "نقطهٔ Host", get: (s) => badge(s.enable_hostdot) },
+  { id: "ipid", label: "IP-ID تصادفی", get: (s) => badge(s.randomize_ip_id) },
+  { id: "scanner", label: "اسکنر SNI", get: (s) => badge(s.enable_sni_scanner) },
+  { id: "rotation", label: "چرخش SNI", small: true, get: (s) => esc(s.sni_rotation_mode || "—") },
+  { id: "autoupdate", label: "بررسی به‌روزرسانی", get: (s) => badge(s.enable_self_update) },
+  { id: "clientdetect", label: "شناسایی کلاینت", get: (s) => badge(s.enable_client_detect) },
+  { id: "ytwarmup", label: "گرم‌کردن یوتیوب", get: (s) => badge(s.enable_youtube_warmup) },
+  { id: "mobilegw", label: "گیت‌وی موبایل", get: (s) => badge(s.enable_mobile_gateway) },
+  { id: "payloadcap", label: "سقف payload", get: (s) => esc(s.max_payload_size || 0) + " B" },
+  { id: "resend", label: "ارسال مجدد جعلی", get: (s) => esc(s.fake_resend_count || 1) + "x" },
+  { id: "autottla2", label: "AutoTTL a2", get: (s) => esc(s.autottl_scale_a2 || 0) },
+];
+
+function buildCardsOnce() {
+  $("cards").innerHTML = CARD_DEFS.map((c) =>
+    '<div class="card"><div class="k">' + esc(c.label) + '</div><div class="v' +
+    (c.small ? " sm" : "") + '" id="cardv_' + c.id + '"></div></div>').join("");
+  state.cardsBuilt = true;
+}
+
+async function refresh() {
+  const s = await api("/api/status");
+  if (!s || typeof s !== "object") throw new Error("Invalid /api/status response");
+  $("conn").textContent = "متصل شد";
+  $("conn").className = "pill on";
+  $("relaypill").textContent = "رله: " + (s.relay_enabled ? "روشن" : "خاموش") +
+    " · " + (s.relay_listen_port || "-");
+  $("relaypill").className = "pill " + (s.relay_enabled ? "on" : "off");
+
+  if (!state.cardsBuilt) buildCardsOnce();
+  for (const c of CARD_DEFS) {
+    const el = $("cardv_" + c.id);
+    if (el) el.innerHTML = c.get(s);
+  }
+
+  $("profiles").innerHTML = PROFILES.map((p) =>
+    '<button class="tiny' + (p === s.mutation_profile ? " on" : "") + '" data-p="' + esc(p) + '">' +
+    esc(p) + "</button>").join("");
+  $("s_cnt").textContent = " · " + (s.strategy_scores || []).length + " records";
+  $("scores").innerHTML = (s.strategy_scores || []).map((x) =>
+    "<tr><td>" + esc(x.key) + '</td><td class="num">' + esc(x.score) + "</td></tr>").join("") ||
+    '<tr><td colspan="2" class="help">No data yet</td></tr>';
+  $("domains").textContent = (s.recent_domains || []).join(", ") || "(none yet)";
+}
+
+async function tick() {
+  if (!state.live) return;
+  try { await refresh(); }
+  catch (e) {
+    $("conn").textContent = "قطع شد";
+    $("conn").className = "pill off";
+    msg("خطا: " + e.message, "bad");
+  }
+}
+
+/* ------------------------------ wiring ------------------------------ */
+
+renderTabBar();
+setTab(state.tab);
+
+if ($("q")) $("q").addEventListener("input", applyFilter);
+$("btn_changed").addEventListener("click", () => {
+  state.onlyDirty = !state.onlyDirty;
+  $("btn_changed").classList.toggle("on", state.onlyDirty);
+  applyFilter();
+});
+
+function toggleLive() {
+  state.live = !state.live;
+  ["btn_live", "btn_live2"].forEach((id) => {
+    const b = $(id); if (!b) return;
+    b.classList.toggle("on", state.live);
+    b.textContent = "به‌روزرسانی زنده: " + (state.live ? "روشن" : "خاموش");
+  });
+}
+$("btn_live").addEventListener("click", toggleLive);
+$("btn_live2").addEventListener("click", toggleLive);
+
+async function doSave() {
+  const keys = dirtyKeys();
+  if (!keys.length) { msg("هیچ تغییری انجام نشده", "warn"); return; }
+  const bad = keys.filter((k) => state.errors[k]);
+  if (bad.length) { msg("اول این خطاها را رفع کنید: " + bad.join("، "), "bad"); return; }
+  const toml = buildPartialToml(keys);
+  try {
+    const ok = await postConfig(toml);
+    if (ok) {
+      if (needsRestart(keys))
+        msg("ذخیره شد؛ ولی تنظیم‌های «نیاز به ری‌استارت» فقط بعد از اجرای مجدد برنامه اعمال می‌شوند", "warn");
+      for (const k of keys) { state.baseline[k] = state.current[k]; state.touched.delete(k); }
+      refreshAllRows(); updateDirtyPill();
+      setTimeout(() => { loadConfig(true).catch(() => {}); }, 1400);
+    }
+  } catch (e) { msg("خطا: " + e.message, "bad"); }
+}
+$("btn_save").addEventListener("click", doSave);
+$("btn_save2").addEventListener("click", doSave);
+
+async function doValidate() {
+  const toml = buildPartialToml(dirtyKeys());
+  if (!toml.trim()) { msg("تغییری برای اعتبارسنجی نیست", "warn"); return; }
+  try {
+    const r = await api("/api/validate", {
+      method: "POST", headers: { "Content-Type": "text/plain" }, body: toml
+    });
+    if (r && r.ok) msg("اعتبارسنجی سمت سرور موفق بود (" + dirtyKeys().length + " فیلد) — ذخیره نشد", "ok");
+    else msg("سرور رد کرد: " + ((r && r.error) || "نامشخص"), "bad");
+  } catch (e) { msg("خطا: " + e.message, "bad"); }
+}
+$("btn_validate").addEventListener("click", doValidate);
+$("btn_validate2").addEventListener("click", doValidate);
+
+function doRevert() {
+  for (const f of FIELDS) { state.current[f.k] = state.baseline[f.k]; setControl(f, state.baseline[f.k]); }
+  state.touched.clear();
+  refreshAllRows(); updateDirtyPill(); msg("تغییرات برگردانده شد", "warn");
+}
+$("btn_revert").addEventListener("click", doRevert);
+$("btn_revert2").addEventListener("click", doRevert);
+
+$("btn_toml_load").addEventListener("click", async () => {
+  try { $("toml").value = String(await api("/api/config/toml") || ""); msg("متن کانفیگ بارگذاری شد", "ok"); }
+  catch (e) { msg("خطا: " + e.message, "bad"); }
+});
+$("btn_toml_validate").addEventListener("click", async () => {
+  const body = $("toml").value;
+  try {
+    const r = await api("/api/validate", {
+      method: "POST", headers: { "Content-Type": "text/plain" }, body
+    });
+    if (r && r.ok) msg("TOML معتبر است", "ok");
+    else msg("سرور رد کرد: " + ((r && r.error) || "نامشخص"), "bad");
+  } catch (e) { msg("خطا: " + e.message, "bad"); }
+});
+$("btn_toml_save").addEventListener("click", async () => {
+  try {
+    if (await postConfig($("toml").value)) setTimeout(() => { loadConfig(true).catch(() => {}); }, 1400);
+  } catch (e) { msg("خطا: " + e.message, "bad"); }
+});
+
+$("btn_token").addEventListener("click", () => {
+  $("tok").value = getToken();
+  $("ovl").classList.remove("hide");
+});
+$("tok_save").addEventListener("click", () => {
+  setToken($("tok").value.trim());
+  $("ovl").classList.add("hide");
+  tick().then(() => loadConfig(true)).catch(() => {});
+});
+$("tok_clear").addEventListener("click", () => {
+  setToken(""); $("tok").value = ""; $("ovl").classList.add("hide");
+});
+
+$("btn_export").addEventListener("click", () => {
+  const data = {};
+  for (const f of FIELDS) if (!f.secret) data[f.k] = state.current[f.k];
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "dpi_guard_ui_settings.json";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$("btn_import").addEventListener("click", () => {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = ".json,application/json";
+  inp.addEventListener("change", () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const data = JSON.parse(String(rd.result));
+        let n = 0;
+        for (const f of FIELDS) {
+          if (f.secret || data[f.k] == null) continue;
+          state.current[f.k] = String(data[f.k]);
+          setControl(f, state.current[f.k]); n++;
+        }
+        refreshAllRows(); updateDirtyPill();
+        msg(n + " field(s) imported from file — click Save to apply", "ok");
+      } catch (e) { msg("Invalid JSON file: " + e.message, "bad"); }
+    };
+    rd.readAsText(file);
+  });
+  inp.click();
+});
+
+document.addEventListener("click", async (e) => {
+  const p = e.target.getAttribute && e.target.getAttribute("data-p");
+  if (!p) return;
+  // One-click apply, but with an explicit confirmation first: switching the
+  // profile is immediate (no hot-reload wait) and affects every new flow.
+  if (!confirm('Switch the mutation profile to "' + p + '"? It applies immediately.')) return;
+  try {
+    await api("/api/profile", { method: "POST", body: JSON.stringify({ profile: p }) });
+    state.baseline.mutation_profile = p;
+    state.current.mutation_profile = p;
+    setControl(byKey.mutation_profile, p);
+    refreshAllRows(); updateDirtyPill();
+    msg("Profile changed to " + p, "ok");
+    setTimeout(tick, 400);
+  } catch (err) { msg("خطا: " + err.message, "bad"); }
+});
+
+/* Unsaved-changes guard: warn when leaving the page with a dirty form. */
+window.addEventListener("beforeunload", (e) => {
+  if (dirtyKeys().length) {
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+
+/* ------------------------------- boot ------------------------------- */
+
+renderFields();
+for (const f of FIELDS) { state.current[f.k] = uiFromConfig({}, f); setControl(f, state.current[f.k]); }
+refreshAllRows();
+updateDirtyPill();
+
+(async function boot() {
+  if (!getToken()) { $("ovl").classList.remove("hide"); return; }
+  try {
+    await loadConfig(true);
+    await refresh();
+    msg("", "");
+  } catch (e) {
+    $("conn").textContent = "قطع شد";
+    $("conn").className = "pill off";
+    msg("خطا: " + e.message, "bad");
+  }
+  setInterval(tick, 4000);
+})();
+// ── Quick-access toolbar ──
+function setBoolQuick(k, v) {
+  const f = byKey[k]; if (!f || f.t !== "bool") return;
+  state.current[k] = String(v);
+  setControl(f, state.current[k]);
+}
+$("qa_all_on").addEventListener("click", () => {
+  setBoolQuick("enable_anti_fingerprint", true);
+  setBoolQuick("randomize_ip_id", true);
+  setBoolQuick("randomize_packet_size", true);
+  setBoolQuick("enable_reverse_frag", true);
+  setBoolQuick("enable_wrong_seq", true);
+  setBoolQuick("enable_wrong_checksum", true);
+  setBoolQuick("enable_oob_injection", true);
+  setBoolQuick("enable_hostdot", true);
+  setBoolQuick("enable_fake_with_sni", true);
+  refreshAllRows(); updateDirtyPill();
+  msg("All techniques turned on — click Save", "ok");
+});
+$("qa_all_off").addEventListener("click", () => {
+  setBoolQuick("enable_anti_fingerprint", false);
+  setBoolQuick("randomize_ip_id", false);
+  setBoolQuick("randomize_packet_size", false);
+  setBoolQuick("enable_reverse_frag", false);
+  setBoolQuick("enable_wrong_seq", false);
+  setBoolQuick("enable_wrong_checksum", false);
+  setBoolQuick("enable_oob_injection", false);
+  setBoolQuick("enable_hostdot", false);
+  setBoolQuick("enable_fake_with_sni", false);
+  refreshAllRows(); updateDirtyPill();
+  msg("Simple mode — click Save", "ok");
+});
+$("qa_stealth").addEventListener("click", () => {
+  // Minimal — only case mutation, no extra techniques
+  const f = byKey["mutation_profile"]; if (f) { state.current["mutation_profile"] = "Stealth"; setControl(f, "Stealth"); }
+  setBoolQuick("enable_decoys", true);
+  setBoolQuick("enable_sni_fragmentation", true);
+  setBoolQuick("enable_anti_fingerprint", false);
+  setBoolQuick("enable_reverse_frag", false);
+  setBoolQuick("enable_wrong_seq", false);
+  setBoolQuick("enable_wrong_checksum", false);
+  setBoolQuick("enable_oob_injection", false);
+  setBoolQuick("enable_hostdot", false);
+  refreshAllRows(); updateDirtyPill();
+  msg("Stealth profile applied", "ok");
+});
+$("qa_aggressive").addEventListener("click", () => {
+  const f = byKey["mutation_profile"]; if (f) { state.current["mutation_profile"] = "Aggressive"; setControl(f, "Aggressive"); }
+  setBoolQuick("enable_decoys", true);
+  setBoolQuick("enable_sni_fragmentation", true);
+  setBoolQuick("enable_anti_fingerprint", true);
+  setBoolQuick("randomize_ip_id", true);
+  setBoolQuick("enable_reverse_frag", true);
+  setBoolQuick("enable_wrong_seq", true);
+  setBoolQuick("enable_wrong_checksum", true);
+  setBoolQuick("enable_fake_with_sni", true);
+  refreshAllRows(); updateDirtyPill();
+  msg("Aggressive profile — every technique on", "ok");
+});
+// Update feature count display
+function updateFeatureCount() {
+  const feats = ["enable_decoys","enable_sni_fragmentation","enable_quic_port_bypass",
+    "enable_utls_fingerprint","enable_ech_grease","enable_sni_disguise",
+    "enable_anti_fingerprint","enable_reverse_frag","enable_wrong_seq",
+    "enable_wrong_checksum","enable_oob_injection","enable_hostdot",
+    "enable_fake_with_sni","enable_http_host_tricks","enable_adaptive_desync",
+    "enable_combined_fragmentation","enable_sni_scanner","enable_self_update"];
+  const on = feats.filter(k => state.current[k] === "true").length;
+  const el = $("feature_count");
+  if (el) el.textContent = on + " از " + feats.length + " قابلیت فعال";
+}
+// Patch refreshAllRows to also update feature count
+const _origRefresh = refreshAllRows;
+refreshAllRows = function() { _origRefresh(); updateFeatureCount(); };
+
+</script>
+</body>
+</html>

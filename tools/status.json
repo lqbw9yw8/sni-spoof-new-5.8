@@ -1,0 +1,529 @@
+{
+  "commit": "9d77955",
+  "modules": {
+    "anti_fingerprint": {
+      "lines": 198,
+      "tests": 8,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "autottl": {
+      "lines": 308,
+      "tests": 10,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "client_detect": {
+      "lines": 151,
+      "tests": 3,
+      "tag": "DONE",
+      "win": 1,
+      "unsafe": false
+    },
+    "config": {
+      "lines": 1289,
+      "tests": 27,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "connection": {
+      "lines": 174,
+      "tests": 7,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "dns_cache": {
+      "lines": 409,
+      "tests": 11,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "dns_guard": {
+      "lines": 127,
+      "tests": 3,
+      "tag": "DONE",
+      "win": 1,
+      "unsafe": false
+    },
+    "doh": {
+      "lines": 541,
+      "tests": 15,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "ech": {
+      "lines": 277,
+      "tests": 7,
+      "tag": "PARTIAL",
+      "win": 0,
+      "unsafe": false
+    },
+    "engine": {
+      "lines": 524,
+      "tests": 0,
+      "tag": "PARTIAL",
+      "win": 0,
+      "unsafe": true
+    },
+    "engine_stub": {
+      "lines": 139,
+      "tests": 3,
+      "tag": null,
+      "win": 1,
+      "unsafe": false
+    },
+    "error": {
+      "lines": 34,
+      "tests": 0,
+      "tag": null,
+      "win": 0,
+      "unsafe": false
+    },
+    "fail_open": {
+      "lines": 108,
+      "tests": 5,
+      "tag": "DONE",
+      "win": 1,
+      "unsafe": false
+    },
+    "fooling": {
+      "lines": 274,
+      "tests": 8,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "fragmentation": {
+      "lines": 799,
+      "tests": 15,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "geedge": {
+      "lines": 208,
+      "tests": 6,
+      "tag": null,
+      "win": 0,
+      "unsafe": false
+    },
+    "handle_retire": {
+      "lines": 133,
+      "tests": 8,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "http_host": {
+      "lines": 288,
+      "tests": 8,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "integrity": {
+      "lines": 107,
+      "tests": 4,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "isp_profiles": {
+      "lines": 209,
+      "tests": 5,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "lib": {
+      "lines": 287,
+      "tests": 7,
+      "tag": "DONE",
+      "win": 2,
+      "unsafe": false
+    },
+    "main": {
+      "lines": 1007,
+      "tests": 0,
+      "tag": null,
+      "win": 2,
+      "unsafe": false
+    },
+    "mobile_gateway": {
+      "lines": 111,
+      "tests": 2,
+      "tag": "DONE",
+      "win": 1,
+      "unsafe": false
+    },
+    "native_gui": {
+      "lines": 698,
+      "tests": 0,
+      "tag": null,
+      "win": 1,
+      "unsafe": false
+    },
+    "netguard": {
+      "lines": 291,
+      "tests": 12,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "packet": {
+      "lines": 722,
+      "tests": 8,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "pipeline": {
+      "lines": 2545,
+      "tests": 41,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "proxy_cleanup": {
+      "lines": 176,
+      "tests": 2,
+      "tag": "DONE",
+      "win": 2,
+      "unsafe": false
+    },
+    "quic": {
+      "lines": 471,
+      "tests": 11,
+      "tag": null,
+      "win": 0,
+      "unsafe": false
+    },
+    "relay": {
+      "lines": 775,
+      "tests": 9,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "scanner": {
+      "lines": 318,
+      "tests": 7,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "self_update": {
+      "lines": 348,
+      "tests": 11,
+      "tag": "PARTIAL",
+      "win": 0,
+      "unsafe": false
+    },
+    "sequence": {
+      "lines": 457,
+      "tests": 14,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "singleton": {
+      "lines": 337,
+      "tests": 3,
+      "tag": "DONE",
+      "win": 8,
+      "unsafe": true
+    },
+    "sni_mutations": {
+      "lines": 423,
+      "tests": 15,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "stealth": {
+      "lines": 534,
+      "tests": 17,
+      "tag": "PARTIAL",
+      "win": 0,
+      "unsafe": false
+    },
+    "strategy": {
+      "lines": 242,
+      "tests": 6,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "utls": {
+      "lines": 322,
+      "tests": 7,
+      "tag": null,
+      "win": 0,
+      "unsafe": false
+    },
+    "warmup": {
+      "lines": 129,
+      "tests": 2,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    },
+    "webui": {
+      "lines": 1081,
+      "tests": 17,
+      "tag": "DONE",
+      "win": 0,
+      "unsafe": false
+    }
+  },
+  "dead": {
+    "client_detect": [
+      "any_running",
+      "first_running"
+    ],
+    "dns_guard": [
+      "block_port_53_except_localhost_spec"
+    ],
+    "fragmentation": [
+      "shuffle_cipher_suites_in_hello"
+    ],
+    "http_host": [
+      "tls_cuts_before_sni"
+    ],
+    "mobile_gateway": [
+      "connected_device_count"
+    ],
+    "proxy_cleanup": [
+      "enable_dpi_guard_proxy",
+      "disable_dpi_guard_proxy"
+    ],
+    "sni_mutations": [
+      "disguise_sni_record"
+    ]
+  },
+  "test_only": {
+    "anti_fingerprint": [
+      "randomize_ip_id_in_range"
+    ],
+    "connection": [
+      "health_from_probe",
+      "parse_ip_list",
+      "smart_backoff"
+    ],
+    "dns_guard": [
+      "init_wfp_hook_spec",
+      "dns_protection_filters",
+      "hijack_dns_requests_target"
+    ],
+    "ech": [
+      "parse_ech_config_from_https_record",
+      "build_outer_sni_for_ech"
+    ],
+    "fooling": [
+      "build_udp_len_decoy"
+    ],
+    "fragmentation": [
+      "ip_level_fragment_offsets"
+    ],
+    "geedge": [
+      "sni_as_ip_literal",
+      "inject_fake_record_before_hello",
+      "should_use_ip_fragmentation",
+      "would_geedge_miss_sni"
+    ],
+    "packet": [
+      "wrap_ipv4_tcp",
+      "wrap_ipv6_tcp"
+    ],
+    "proxy_cleanup": [
+      "state_file_path"
+    ],
+    "quic": [
+      "is_in_blindspot",
+      "build_quic_decoy"
+    ],
+    "sequence": [
+      "calculate_wrong_seq",
+      "add_padding_to_decoy"
+    ],
+    "sni_mutations": [
+      "inject_whitespace",
+      "apply_homoglyphs"
+    ],
+    "stealth": [
+      "add_dynamic_jitter",
+      "normalize_ttl",
+      "fake_tcp_options",
+      "encode_tcp_options"
+    ],
+    "strategy": [
+      "ab_test_block_type"
+    ],
+    "utls": [
+      "rotate_fingerprint"
+    ]
+  },
+  "settings_fields": 77,
+  "unwired": [],
+  "dependencies": {
+    "anti_fingerprint": [
+      "packet"
+    ],
+    "client_detect": [
+      "error"
+    ],
+    "config": [
+      "doh",
+      "error",
+      "isp_profiles",
+      "netguard",
+      "self_update",
+      "sni_mutations",
+      "stealth"
+    ],
+    "dns_cache": [
+      "netguard"
+    ],
+    "dns_guard": [
+      "error"
+    ],
+    "doh": [
+      "dns_cache",
+      "error",
+      "netguard",
+      "stealth"
+    ],
+    "ech": [
+      "error",
+      "fragmentation"
+    ],
+    "engine": [
+      "anti_fingerprint",
+      "error",
+      "fail_open",
+      "fragmentation",
+      "handle_retire",
+      "integrity",
+      "packet",
+      "sequence"
+    ],
+    "engine_stub": [
+      "engine",
+      "error",
+      "fail_open",
+      "fragmentation",
+      "packet"
+    ],
+    "fail_open": [
+      "error"
+    ],
+    "fooling": [
+      "error",
+      "packet"
+    ],
+    "fragmentation": [
+      "error",
+      "stealth"
+    ],
+    "geedge": [
+      "error",
+      "fragmentation",
+      "sni_mutations"
+    ],
+    "http_host": [
+      "error",
+      "fragmentation"
+    ],
+    "integrity": [
+      "error"
+    ],
+    "isp_profiles": [
+      "config",
+      "error"
+    ],
+    "mobile_gateway": [
+      "error"
+    ],
+    "native_gui": [
+      "config"
+    ],
+    "netguard": [
+      "error"
+    ],
+    "packet": [
+      "error"
+    ],
+    "pipeline": [
+      "anti_fingerprint",
+      "autottl",
+      "config",
+      "connection",
+      "ech",
+      "error",
+      "fail_open",
+      "fooling",
+      "fragmentation",
+      "geedge",
+      "http_host",
+      "packet",
+      "quic",
+      "relay",
+      "sequence",
+      "sni_mutations",
+      "stealth",
+      "strategy",
+      "utls"
+    ],
+    "proxy_cleanup": [
+      "error"
+    ],
+    "quic": [
+      "config",
+      "error",
+      "packet"
+    ],
+    "relay": [
+      "error",
+      "stealth"
+    ],
+    "scanner": [
+      "error"
+    ],
+    "self_update": [
+      "error"
+    ],
+    "sequence": [
+      "error",
+      "packet",
+      "stealth"
+    ],
+    "singleton": [
+      "error"
+    ],
+    "sni_mutations": [
+      "error",
+      "fragmentation"
+    ],
+    "stealth": [
+      "dns_guard",
+      "error"
+    ],
+    "utls": [
+      "error",
+      "fragmentation",
+      "stealth"
+    ],
+    "webui": [
+      "config",
+      "error",
+      "integrity",
+      "pipeline"
+    ]
+  }
+}
