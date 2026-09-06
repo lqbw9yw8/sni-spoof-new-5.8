@@ -1,8 +1,8 @@
 {
-  "commit": "9d77955",
+  "commit": "7811307",
   "modules": {
     "anti_fingerprint": {
-      "lines": 198,
+      "lines": 192,
       "tests": 8,
       "tag": "DONE",
       "win": 0,
@@ -16,8 +16,8 @@
       "unsafe": false
     },
     "client_detect": {
-      "lines": 151,
-      "tests": 3,
+      "lines": 163,
+      "tests": 5,
       "tag": "DONE",
       "win": 1,
       "unsafe": false
@@ -44,8 +44,8 @@
       "unsafe": false
     },
     "dns_guard": {
-      "lines": 127,
-      "tests": 3,
+      "lines": 143,
+      "tests": 5,
       "tag": "DONE",
       "win": 1,
       "unsafe": false
@@ -79,8 +79,8 @@
       "unsafe": false
     },
     "error": {
-      "lines": 34,
-      "tests": 0,
+      "lines": 69,
+      "tests": 1,
       "tag": null,
       "win": 0,
       "unsafe": false
@@ -100,8 +100,8 @@
       "unsafe": false
     },
     "fragmentation": {
-      "lines": 799,
-      "tests": 15,
+      "lines": 810,
+      "tests": 16,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
@@ -121,8 +121,8 @@
       "unsafe": false
     },
     "http_host": {
-      "lines": 288,
-      "tests": 8,
+      "lines": 296,
+      "tests": 9,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
@@ -149,22 +149,22 @@
       "unsafe": false
     },
     "main": {
-      "lines": 1007,
-      "tests": 0,
+      "lines": 1157,
+      "tests": 6,
       "tag": null,
       "win": 2,
       "unsafe": false
     },
     "mobile_gateway": {
-      "lines": 111,
-      "tests": 2,
+      "lines": 117,
+      "tests": 3,
       "tag": "DONE",
       "win": 1,
       "unsafe": false
     },
     "native_gui": {
-      "lines": 698,
-      "tests": 0,
+      "lines": 843,
+      "tests": 8,
       "tag": null,
       "win": 1,
       "unsafe": false
@@ -184,15 +184,15 @@
       "unsafe": false
     },
     "pipeline": {
-      "lines": 2545,
+      "lines": 2561,
       "tests": 41,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
     },
     "proxy_cleanup": {
-      "lines": 176,
-      "tests": 2,
+      "lines": 191,
+      "tests": 4,
       "tag": "DONE",
       "win": 2,
       "unsafe": false
@@ -240,8 +240,8 @@
       "unsafe": true
     },
     "sni_mutations": {
-      "lines": 423,
-      "tests": 15,
+      "lines": 433,
+      "tests": 16,
       "tag": "DONE",
       "win": 0,
       "unsafe": false
@@ -282,48 +282,14 @@
       "unsafe": false
     }
   },
-  "dead": {
-    "client_detect": [
-      "any_running",
-      "first_running"
-    ],
-    "dns_guard": [
-      "block_port_53_except_localhost_spec"
-    ],
-    "fragmentation": [
-      "shuffle_cipher_suites_in_hello"
-    ],
-    "http_host": [
-      "tls_cuts_before_sni"
-    ],
-    "mobile_gateway": [
-      "connected_device_count"
-    ],
-    "proxy_cleanup": [
-      "enable_dpi_guard_proxy",
-      "disable_dpi_guard_proxy"
-    ],
-    "sni_mutations": [
-      "disguise_sni_record"
-    ]
-  },
+  "dead": {},
   "test_only": {
-    "anti_fingerprint": [
-      "randomize_ip_id_in_range"
-    ],
     "connection": [
       "health_from_probe",
-      "parse_ip_list",
       "smart_backoff"
     ],
-    "dns_guard": [
-      "init_wfp_hook_spec",
-      "dns_protection_filters",
-      "hijack_dns_requests_target"
-    ],
     "ech": [
-      "parse_ech_config_from_https_record",
-      "build_outer_sni_for_ech"
+      "parse_ech_config_from_https_record"
     ],
     "fooling": [
       "build_udp_len_decoy"
@@ -331,34 +297,26 @@
     "fragmentation": [
       "ip_level_fragment_offsets"
     ],
-    "geedge": [
-      "sni_as_ip_literal",
-      "inject_fake_record_before_hello",
-      "should_use_ip_fragmentation",
-      "would_geedge_miss_sni"
+    "http_host": [
+      "tls_cuts_before_sni"
     ],
     "packet": [
       "wrap_ipv4_tcp",
       "wrap_ipv6_tcp"
     ],
     "proxy_cleanup": [
+      "enable_dpi_guard_proxy",
+      "disable_dpi_guard_proxy",
       "state_file_path"
     ],
     "quic": [
-      "is_in_blindspot",
-      "build_quic_decoy"
-    ],
-    "sequence": [
-      "calculate_wrong_seq",
-      "add_padding_to_decoy"
+      "is_in_blindspot"
     ],
     "sni_mutations": [
-      "inject_whitespace",
-      "apply_homoglyphs"
+      "disguise_sni_record"
     ],
     "stealth": [
       "add_dynamic_jitter",
-      "normalize_ttl",
       "fake_tcp_options",
       "encode_tcp_options"
     ],

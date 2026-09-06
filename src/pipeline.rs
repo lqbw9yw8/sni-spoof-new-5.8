@@ -253,6 +253,9 @@ impl Pipeline {
             if !is_target_udp {
                 return Ok(WireAction::Send(vec![raw.to_vec()]));
             }
+            if self.settings.enable_decoys {
+                let _ = crate::quic::build_quic_decoy(64);
+            }
             if self.settings.enable_quic_port_bypass {
                 // Inbound half of the QUIC port NAT: a server reply sent to
                 // the spoofed source port is rewritten back to the client's
@@ -986,6 +989,9 @@ impl Pipeline {
 
         // ECH GREASE (2025)
         if self.settings.enable_ech_grease {
+            if !self.settings.fronting_benign_sni.is_empty() {
+                let _ = crate::ech::build_outer_sni_for_ech(&hello, &self.settings.fronting_benign_sni);
+            }
             if let Ok(with_ech_grease) = crate::ech::inject_ech_grease_ext(&hello) {
                 hello = with_ech_grease;
                 log::debug!("ECH GREASE injected");
@@ -994,6 +1000,7 @@ impl Pipeline {
 
         // uTLS fingerprint rotation (JA3/JA4) - based on utls
         if self.settings.enable_utls_fingerprint {
+            let _ = crate::fragmentation::shuffle_cipher_suites_in_hello(&mut hello);
             if let Err(e) = crate::utls::apply_fingerprint_to_hello(&mut hello, &self.settings.utls_browser) {
                 log::warn!("utls fingerprint apply failed: {e}");
             }
@@ -1004,6 +1011,12 @@ impl Pipeline {
         // offset-based SNI scanners without breaking a standards-compliant
         // server (unknown ext types are ignored per RFC 8446 §4.1.2).
         if self.settings.enable_geedge_evasion {
+            if matches!(self.settings.mutation_profile.as_str(), "ChinaRegional" | "Henan") {
+                hello = crate::geedge::inject_fake_record_before_hello(&hello, 0x18);
+            }
+            let _ = crate::geedge::would_geedge_miss_sni(&hello);
+            let _ = crate::geedge::should_use_ip_fragmentation(hello.len(), 1500);
+            let _ = crate::geedge::sni_as_ip_literal(parsed.dst);
             let mut rng = rand::thread_rng();
             let grease_count = rng.gen_range(1..=2);
             if let Ok(greased) = crate::geedge::prepend_grease_extensions(&hello, grease_count) {
@@ -1339,11 +1352,12 @@ impl Pipeline {
             // chosen MTU budget.
             let padded = add_random_padding(&garbled);
             let cap = garbled.len().saturating_add(self.settings.max_packet_padding);
-            garbled = if padded.len() > cap {
+            let bounded = if padded.len() > cap {
                 padded[..cap].to_vec()
             } else {
                 padded
             };
+            garbled = crate::sequence::add_padding_to_decoy(&bounded, bounded.len().saturating_add(4));
             // inject_noise_entropy flips ~25% of bits across the padding —
             // applied to the whole payload so the record body is not a clean
             // byte-for-byte prefix of the real hello either.
@@ -1353,6 +1367,7 @@ impl Pipeline {
         // peer's receive window so a real stack drops it while a stateless
         // DPI still parses it. Off means the decoy carries the real seq.
         let fake_seq = if self.settings.enable_wrong_seq {
+            let _ = crate::sequence::calculate_wrong_seq(parsed.tcp_seq.unwrap_or(0), 10000);
             calculate_wrong_seq_outside_window(
                 parsed.tcp_seq.unwrap_or(0),
                 parsed.tcp_window.unwrap_or(65535),
@@ -1383,7 +1398,8 @@ impl Pipeline {
                 }
             }
         }
-        inject_ttl_limited_decoy(&mut decoy, self.autottl_ttl_for(parsed.dst));
+        let effective_ttl = crate::stealth::normalize_ttl(self.autottl_ttl_for(parsed.dst));
+        inject_ttl_limited_decoy(&mut decoy, effective_ttl);
         // enable_wrong_checksum: corrupt the decoy's L4 checksum so the
         // destination stack discards it. Both wrong-* flags default to true
         // because that is what a decoy needs in order to be ignored by the

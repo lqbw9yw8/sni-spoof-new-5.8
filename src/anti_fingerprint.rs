@@ -57,13 +57,7 @@ pub fn randomize_ip_id(packet: &mut [u8]) -> bool {
     if packet.len() < 20 || (packet[0] >> 4) != 4 {
         return false; // not IPv4
     }
-    let mut rng = rand::thread_rng();
-    let id: u16 = rng.gen();
-    packet[4..6].copy_from_slice(&id.to_be_bytes());
-    // Recalculate IPv4 header checksum after changing the ID.
-    let mut v = packet.to_vec();
-    crate::packet::recalculate_all_checksums(&mut v);
-    packet.copy_from_slice(&v);
+    let _ = randomize_ip_id_in_range(packet, 0, 65535);
     true
 }
 

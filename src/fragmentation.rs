@@ -780,6 +780,17 @@ mod tests {
     }
 
     #[test]
+    fn shuffle_cipher_suites_in_hello_preserves_length_and_reparses() {
+        let mut record = encode_client_hello("example.com");
+        let orig_len = record.len();
+        let res = shuffle_cipher_suites_in_hello(&mut record);
+        assert!(res.is_ok());
+        assert_eq!(record.len(), orig_len);
+        let info = parse_client_hello(&record).unwrap();
+        assert_eq!(info.cipher_suites_len, 4);
+    }
+
+    #[test]
     fn list_extensions_exposes_sni_and_injected_span() {
         let record = encode_client_hello("example.com");
         let exts = list_extensions(&record).unwrap();

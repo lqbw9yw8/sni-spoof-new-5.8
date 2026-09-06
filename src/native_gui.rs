@@ -695,3 +695,148 @@ impl eframe::App for DpiGuardApp {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lines_helper_trims_and_filters_empty() {
+        let input = "  line1  \n\n  line2\r\n   \nline3\n";
+        let parsed = lines(input);
+        assert_eq!(parsed, vec!["line1", "line2", "line3"]);
+    }
+
+    #[test]
+    fn list_buffers_from_settings_roundtrips() {
+        let mut s = Settings::default();
+        s.intercept_ports = vec![443, 8443];
+        s.sni_only = vec!["example.com".into(), "test.org".into()];
+        s.sni_candidates = vec!["www.microsoft.com".into()];
+        let bufs = ListBuffers::from_settings(&s);
+        assert!(bufs.intercept_ports.contains("443"));
+        assert!(bufs.intercept_ports.contains("8443"));
+        assert_eq!(bufs.sni_only, "example.com\ntest.org");
+        assert_eq!(bufs.sni_candidates, "www.microsoft.com");
+    }
+
+    #[test]
+    fn sync_lists_parses_valid_ports() {
+        let mut app = DpiGuardApp {
+            config_path: PathBuf::from("dpi_guard.toml"),
+            settings: Settings::default(),
+            lists: ListBuffers {
+                win_divert_sha256: "".into(),
+                intercept_ports: "443, 8443, 2053".into(),
+                sni_only: "a.com\nb.com".into(),
+                sni_except: "c.com".into(),
+                sni_candidates: "d.com".into(),
+                edge_candidates: "1.1.1.1".into(),
+                ipset_hostlist: "e.com".into(),
+            },
+            raw_toml: String::new(),
+            tab: 0,
+            message: String::new(),
+            log: Vec::new(),
+            child: None,
+            user_stopped: false,
+            auto_restarts: 0,
+        };
+        assert!(app.sync_lists().is_ok());
+        assert_eq!(app.settings.intercept_ports, vec![443, 8443, 2053]);
+        assert_eq!(app.settings.sni_only, vec!["a.com", "b.com"]);
+        assert_eq!(app.settings.sni_except, vec!["c.com"]);
+        assert_eq!(app.settings.edge_candidates, vec!["1.1.1.1"]);
+    }
+
+    #[test]
+    fn sync_lists_rejects_invalid_port() {
+        let mut app = DpiGuardApp {
+            config_path: PathBuf::from("dpi_guard.toml"),
+            settings: Settings::default(),
+            lists: ListBuffers {
+                intercept_ports: "443, not_a_port, 8443".into(),
+                ..Default::default()
+            },
+            raw_toml: String::new(),
+            tab: 0,
+            message: String::new(),
+            log: Vec::new(),
+            child: None,
+            user_stopped: false,
+            auto_restarts: 0,
+        };
+        let res = app.sync_lists();
+        assert!(res.is_err());
+        assert!(res.unwrap_err().contains("Invalid port"));
+    }
+
+    #[test]
+    fn apply_raw_toml_applies_valid_toml() {
+        let mut app = DpiGuardApp {
+            config_path: PathBuf::from("dpi_guard.toml"),
+            settings: Settings::default(),
+            lists: ListBuffers::default(),
+            raw_toml: "mutation_profile = \"Henan\"\ndecoy_ttl = 15\n".into(),
+            tab: 0,
+            message: String::new(),
+            log: Vec::new(),
+            child: None,
+            user_stopped: false,
+            auto_restarts: 0,
+        };
+        app.apply_raw_toml();
+        assert_eq!(app.settings.mutation_profile, "Henan");
+        assert_eq!(app.settings.decoy_ttl, 15);
+        assert_eq!(app.message, "TOML applied");
+    }
+
+    #[test]
+    fn apply_raw_toml_rejects_invalid_toml() {
+        let mut app = DpiGuardApp {
+            config_path: PathBuf::from("dpi_guard.toml"),
+            settings: Settings::default(),
+            lists: ListBuffers::default(),
+            raw_toml: "this is not valid toml {[[".into(),
+            tab: 0,
+            message: String::new(),
+            log: Vec::new(),
+            child: None,
+            user_stopped: false,
+            auto_restarts: 0,
+        };
+        app.apply_raw_toml();
+        assert!(app.message.starts_with("TOML error:"));
+    }
+
+    #[test]
+    fn logln_maintains_cap() {
+        let mut app = DpiGuardApp {
+            config_path: PathBuf::from("dpi_guard.toml"),
+            settings: Settings::default(),
+            lists: ListBuffers::default(),
+            raw_toml: String::new(),
+            tab: 0,
+            message: String::new(),
+            log: Vec::new(),
+            child: None,
+            user_stopped: false,
+            auto_restarts: 0,
+        };
+        for i in 0..600 {
+            app.logln(&format!("entry {i}"));
+        }
+        assert!(app.log.len() <= 500);
+    }
+
+    #[test]
+    fn tabs_metadata_complete() {
+        assert_eq!(TABS.len(), 6);
+        assert_eq!(TABS[0], "Overview");
+        assert_eq!(TABS[1], "Proxy & SNI");
+        assert_eq!(TABS[2], "Traffic");
+        assert_eq!(TABS[3], "Connection");
+        assert_eq!(TABS[4], "Advanced");
+        assert_eq!(TABS[5], "Raw TOML");
+    }
+}

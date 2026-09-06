@@ -117,10 +117,26 @@ mod tests {
     }
 
     #[test]
+    fn block_port_53_except_localhost_spec_matches_block_rule() {
+        let spec = block_port_53_except_localhost_spec();
+        assert!(spec.action_block);
+        assert_eq!(spec.remote_port, Some(53));
+        assert_eq!(spec.layer, "FWPM_LAYER_ALE_AUTH_CONNECT_V4");
+    }
+
+    #[test]
+    fn block_port_53_except_localhost_returns_stub_error() {
+        let res = block_port_53_except_localhost();
+        assert!(res.is_err());
+    }
+
+    #[test]
     fn hijack_rejects_loopback_and_unspecified_targets() {
         assert!(hijack_dns_requests_target(Ipv4Addr::LOCALHOST).is_err());
         assert!(hijack_dns_requests_target(Ipv4Addr::UNSPECIFIED).is_err());
         let spec = hijack_dns_requests_spec(Ipv4Addr::new(1, 1, 1, 1)).unwrap();
         assert!(spec.needs_callout_driver);
+        let target = hijack_dns_requests_target(Ipv4Addr::new(1, 1, 1, 1)).unwrap();
+        assert_eq!(target, Ipv4Addr::new(1, 1, 1, 1));
     }
 }

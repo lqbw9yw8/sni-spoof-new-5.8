@@ -172,4 +172,19 @@ mod tests {
         let path = state_file_path();
         assert!(path.to_string_lossy().ends_with("dpi_guard.proxy_state"));
     }
+
+    #[test]
+    fn enable_and_disable_dpi_guard_proxy_roundtrips() {
+        // On non-Windows these are safe no-ops that return Ok(())
+        let res = enable_dpi_guard_proxy("127.0.0.1", 40443);
+        assert!(res.is_ok());
+        let res_disable = disable_dpi_guard_proxy();
+        assert!(res_disable.is_ok());
+    }
+
+    #[test]
+    fn save_and_restore_state_roundtrips() {
+        assert!(save_state().is_ok());
+        assert!(restore_state().is_ok());
+    }
 }

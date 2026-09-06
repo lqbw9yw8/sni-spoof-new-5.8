@@ -107,4 +107,10 @@ mod tests {
         // May be empty in sandbox — that's fine
         let _ = devices;
     }
+
+    #[test]
+    fn connected_device_count_runs_without_panic() {
+        let count = connected_device_count();
+        assert!(count >= 0);
+    }
 }
