@@ -147,4 +147,16 @@ mod tests {
         let results = detect_all();
         assert_eq!(results.len(), 5);
     }
+
+    #[test]
+    fn any_running_returns_boolean() {
+        let _ = any_running();
+    }
+
+    #[test]
+    fn first_running_matches_any_running() {
+        let any = any_running();
+        let first = first_running();
+        assert_eq!(any, first.is_some());
+    }
 }

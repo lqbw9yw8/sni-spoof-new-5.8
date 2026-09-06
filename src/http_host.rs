@@ -211,6 +211,14 @@ mod tests {
     }
 
     #[test]
+    fn tls_cuts_before_sni_delegates_to_fragmentation() {
+        let record = crate::fragmentation::encode_client_hello("example.com");
+        let parts = tls_cuts_before_sni(&record).unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(parts[0][0], 0x16);
+    }
+
+    #[test]
     fn host_match_case_insensitive() {
         let (s, e) = find_host_line(
             b"GET / HTTP/1.1\r\nHOST: EXAMPLE.COM\r\n\r\n"

@@ -248,7 +248,9 @@ pub fn get_mutation_profile(profile: MutationProfile) -> Vec<fn(&[u8]) -> Vec<u8
             inject_null_byte,
             explode_subdomains,
             randomize_case_sni,
+            inject_whitespace,
             inject_underscore,
+            apply_homoglyphs,
             insert_consecutive_dots,
             force_length_overflow,
             append_port_suffix,
@@ -410,6 +412,14 @@ mod tests {
             MutationProfile::from_str("Stealth").unwrap(),
             MutationProfile::Stealth
         );
+    }
+
+    #[test]
+    fn disguise_sni_record_changes_extension_type() {
+        let record = crate::fragmentation::encode_client_hello("example.com");
+        let disguised = disguise_sni_record(&record, 0x0A0A).unwrap();
+        assert_eq!(disguised.len(), record.len());
+        assert!(crate::fragmentation::sni_bytes(&disguised).is_none());
     }
 
     #[test]

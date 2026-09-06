@@ -21,12 +21,289 @@
 //! On non-Windows the binary prints a platform notice and exits 1; every
 //! pure-logic module is still exercised by `cargo test` on any OS.
 
+use dpi_guard::{config, engine, pipeline::Pipeline, webui};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+/// Identity of a running relay, used to detect config changes that
+/// require a restart. `require_inject` is part of the identity because
+/// toggling fail-closed mode must restart the relay task.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RelayId {
+    pub enabled: bool,
+    pub listen_port: u16,
+    pub connect_host: String,
+    pub connect_port: u16,
+    pub fake_sni: String,
+    pub resolve_doh: bool,
+    pub doh_server: String,
+    pub mutate_real_sni: bool,
+    pub emit_decoy: bool,
+    pub require_inject: bool,
+    pub idle_timeout_secs: u64,
+}
+
+impl RelayId {
+    pub fn desired(settings: &config::Settings) -> Self {
+        RelayId {
+            enabled: settings.relay_enabled,
+            listen_port: settings.relay_listen_port,
+            connect_host: settings.relay_connect_host.clone(),
+            connect_port: settings.relay_connect_port,
+            fake_sni: settings.relay_fake_sni.clone(),
+            resolve_doh: settings.relay_resolve_doh,
+            doh_server: settings.doh_server.clone(),
+            mutate_real_sni: settings.relay_mutate_real_sni,
+            emit_decoy: settings.relay_emit_decoy,
+            require_inject: settings.relay_require_inject,
+            idle_timeout_secs: settings.idle_timeout_secs,
+        }
+    }
+}
+
+pub struct RelayRuntime {
+    pub flag: Option<Arc<AtomicBool>>,
+    pub handle: Option<std::thread::JoinHandle<()>>,
+    pub id: Option<RelayId>,
+    /// The relay settings a background resolution is currently running
+    /// for. While set, `reconcile` will not spawn a second resolver.
+    pub resolving: Option<RelayId>,
+    /// Slot filled by the background resolver thread: `(wanted RelayId,
+    /// resolved IP)` — IP is `None` when resolution failed.
+    pub resolved: Arc<Mutex<Option<(RelayId, Option<std::net::IpAddr>)>>>,
+    /// IP the running relay was last started with, so a re-resolution
+    /// can detect a DNS change during an outage.
+    pub last_ip: Option<std::net::IpAddr>,
+}
+
+impl RelayRuntime {
+    pub fn new() -> Self {
+        Self {
+            flag: None,
+            handle: None,
+            id: None,
+            resolving: None,
+            resolved: Arc::new(Mutex::new(None)),
+            last_ip: None,
+        }
+    }
+
+    pub fn desired(settings: &config::Settings) -> RelayId {
+        RelayId::desired(settings)
+    }
+
+    pub fn stop(&mut self) {
+        if let Some(f) = self.flag.take() {
+            f.store(false, Ordering::SeqCst);
+        }
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+        self.id = None;
+        self.last_ip = None;
+    }
+
+    /// True when the settings ask for a relay but none is running.
+    ///
+    /// That is the state a failed start leaves behind: the network was
+    /// down at boot, the destination would not resolve, or the listen
+    /// port was taken. Without a periodic retry the relay would stay
+    /// dead until the operator happened to touch `dpi_guard.toml`,
+    /// which is exactly the wrong behaviour on a link that drops and
+    /// comes back all day.
+    pub fn wants_but_not_running(&self, settings: &config::Settings) -> bool {
+        settings.relay_enabled && self.id.is_none()
+    }
+
+    /// Start (or restart) the relay with an already-resolved IP. Fast
+    /// path: no DNS, no DoH — safe to call from the watchdog tick.
+    pub fn start_with_ip(
+        &mut self,
+        want: RelayId,
+        connect_ip: std::net::IpAddr,
+        pipeline: Arc<Mutex<Pipeline>>,
+    ) {
+        self.stop();
+        {
+            let mut p = dpi_guard::recover_mutex(&pipeline);
+            p.configure_relay(Some(dpi_guard::relay::RelayMode {
+                fake_sni: want.fake_sni.clone(),
+                connect_port: want.connect_port,
+                mutate_real_sni: want.mutate_real_sni,
+                emit_decoy: want.emit_decoy,
+                require_inject: want.require_inject,
+            }));
+        }
+        let target = dpi_guard::relay::RelayTarget {
+            connect_ip,
+            connect_port: want.connect_port,
+            fake_sni: want.fake_sni.clone(),
+            require_inject: want.require_inject,
+            idle_timeout: std::time::Duration::from_secs(want.idle_timeout_secs.max(1)),
+        };
+        let flag = Arc::new(AtomicBool::new(true));
+        let pipe = pipeline.clone();
+        let pipe_close = pipeline.clone();
+        let hooks = dpi_guard::relay::FlowHooks::new(
+            move |flow| {
+                let mut p = dpi_guard::recover_mutex(&pipe);
+                p.register_relay_flow(flow)
+            },
+            move |flow| {
+                // Release the slot as soon as the connection ends,
+                // instead of waiting for the idle sweep. A destination
+                // that always fails injection would otherwise fill the
+                // table and start evicting healthy live flows.
+                let mut p = dpi_guard::recover_mutex(&pipe_close);
+                p.unregister_relay_flow(flow);
+            },
+        );
+        match dpi_guard::relay::run(target.clone(), want.listen_port, flag.clone(), hooks) {
+            Ok(h) => {
+                log::info!(
+                    "relay started: 127.0.0.1:{} -> {} (fake SNI {:?}, require_inject={})",
+                    want.listen_port,
+                    dpi_guard::stealth::redact_endpoint(&format!(
+                        "{}:{}",
+                        connect_ip, want.connect_port
+                    )),
+                    want.fake_sni,
+                    want.require_inject
+                );
+                self.flag = Some(flag);
+                self.handle = Some(h);
+                self.id = Some(want);
+                self.last_ip = Some(connect_ip);
+            }
+            Err(e) => log::error!("relay start failed: {e}"),
+        }
+    }
+
+    /// Spawn a background thread that resolves the destination for
+    /// `want`. The result lands in `self.resolved` and is applied by the
+    /// next `reconcile` call, so the watchdog tick never blocks on DoH
+    /// (previously a retry could stall held-packet flushing for up to
+    /// the ~16 s DoH budget).
+    pub fn kick_resolution(&mut self, want: RelayId) {
+        if self.resolving.as_ref() == Some(&want) {
+            return; // already resolving this exact configuration
+        }
+        self.resolving = Some(want.clone());
+        let slot = self.resolved.clone();
+        std::thread::Builder::new()
+            .name("dpi_guard-relay-resolve".into())
+            .spawn(move || {
+                let ip = resolve_relay_ip(&want);
+                *dpi_guard::recover_mutex(&slot) = Some((want, ip));
+            })
+            .ok();
+    }
+
+    pub fn reconcile(&mut self, settings: &config::Settings, pipeline: Arc<Mutex<Pipeline>>) {
+        let want = Self::desired(settings);
+
+        // (a) Apply a finished background resolution, if any.
+        let finished = dpi_guard::recover_mutex(&self.resolved).take();
+        if let Some((want_id, ip)) = finished {
+            self.resolving = None;
+            if let Some(ip) = ip {
+                let config_changed = self.id.as_ref() != Some(&want_id);
+                let ip_changed = self.last_ip != Some(ip);
+                if want_id.enabled && (config_changed || ip_changed) {
+                    if ip_changed && !config_changed {
+                        log::info!(
+                            "relay destination DNS changed; restarting relay with the new IP"
+                        );
+                    }
+                    // Fail-closed: never start the relay without a live
+                    // capture handle. The boot ordering below reconciles
+                    // only when ready, and this gate keeps the watchdog
+                    // from starting the relay on a later pass when
+                    // capture never came up (audit gap: boot-only gate).
+                    if dpi_guard::engine::capture_is_ready() {
+                        self.start_with_ip(want_id, ip, pipeline.clone());
+                    } else {
+                        log::warn!("relay start deferred: capture not ready (fail-closed)");
+                    }
+                    return;
+                }
+            } else {
+                log::error!("relay destination resolution failed; will retry");
+            }
+        }
+
+        // (b) Nothing to do when the running relay already matches.
+        if self.id.as_ref() == Some(&want) {
+            return;
+        }
+        if !want.enabled {
+            self.stop();
+            {
+                let mut p = dpi_guard::recover_mutex(&pipeline);
+                p.configure_relay(None);
+            }
+            return;
+        }
+
+        // (c) Resolve the destination off-thread. Resolve BEFORE
+        // tearing down the old relay: if the new destination won't
+        // resolve, keep the previous relay running (fail-closed). The
+        // watchdog tick returns immediately; the result is applied by
+        // the next reconcile pass.
+        //
+        // Fail-closed: no capture, no relay — not at boot, not later.
+        // A stop (path (b) above) always runs; only (re)starts are
+        // gated, so disabling the relay can never be blocked by this.
+        if !dpi_guard::engine::capture_is_ready() {
+            if want.enabled && self.id.is_none() {
+                log::debug!("relay start deferred: capture not ready (fail-closed)");
+            }
+            return;
+        }
+        self.kick_resolution(want);
+    }
+}
+
+/// Resolve the relay destination for a wanted relay config, honoring
+/// `relay_resolve_doh`. Runs on a dedicated thread; never call this on
+/// the watchdog thread.
+pub fn resolve_relay_ip(want: &RelayId) -> Option<std::net::IpAddr> {
+    let connect_ip = if want.resolve_doh {
+        match dpi_guard::doh::resolve_a_v4(&want.connect_host, &want.doh_server)
+            .and_then(|ips| {
+                ips.into_iter().next().ok_or_else(|| {
+                    dpi_guard::DpiGuardError::Resolution("no addresses resolved".into())
+                })
+            }) {
+            Ok(ip) => ip,
+            Err(e) => {
+                log::error!("relay destination resolution failed: {e}");
+                return None;
+            }
+        }
+    } else {
+        match want.connect_host.parse::<std::net::IpAddr>() {
+            Ok(ip) => ip,
+            Err(e) => {
+                log::error!(
+                    "relay_connect_host is not an IP and relay_resolve_doh is off: {e}"
+                );
+                return None;
+            }
+        }
+    };
+    // Validate the resolved/parsed IP (loopback/link-local/etc.).
+    match dpi_guard::netguard::validate_relay_ip(connect_ip) {
+        Ok(()) => Some(connect_ip),
+        Err(e) => {
+            log::error!("relay destination rejected: {e}");
+            None
+        }
+    }
+}
+
 #[cfg(windows)]
 fn backend_main() {
-    use dpi_guard::{config, engine, pipeline::Pipeline, webui};
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::sync::{Arc, Mutex};
-
     // (1) Singleton first — before we touch the network or open the driver.
     let _singleton = match dpi_guard::singleton::acquire() {
         Ok(g) => g,
@@ -35,277 +312,6 @@ fn backend_main() {
             std::process::exit(1);
         }
     };
-
-    /// Identity of a running relay, used to detect config changes that
-    /// require a restart. `require_inject` is part of the identity because
-    /// toggling fail-closed mode must restart the relay task.
-    #[derive(Clone, PartialEq)]
-    struct RelayId {
-        enabled: bool,
-        listen_port: u16,
-        connect_host: String,
-        connect_port: u16,
-        fake_sni: String,
-        resolve_doh: bool,
-        doh_server: String,
-        mutate_real_sni: bool,
-        emit_decoy: bool,
-        require_inject: bool,
-        idle_timeout_secs: u64,
-    }
-
-    struct RelayRuntime {
-        flag: Option<Arc<AtomicBool>>,
-        handle: Option<std::thread::JoinHandle<()>>,
-        id: Option<RelayId>,
-        /// The relay settings a background resolution is currently running
-        /// for. While set, `reconcile` will not spawn a second resolver.
-        resolving: Option<RelayId>,
-        /// Slot filled by the background resolver thread: `(wanted RelayId,
-        /// resolved IP)` — IP is `None` when resolution failed.
-        resolved: Arc<Mutex<Option<(RelayId, Option<std::net::IpAddr>)>>>,
-        /// IP the running relay was last started with, so a re-resolution
-        /// can detect a DNS change during an outage.
-        last_ip: Option<std::net::IpAddr>,
-    }
-
-    impl RelayRuntime {
-        fn new() -> Self {
-            Self {
-                flag: None,
-                handle: None,
-                id: None,
-                resolving: None,
-                resolved: Arc::new(Mutex::new(None)),
-                last_ip: None,
-            }
-        }
-
-        fn desired(settings: &config::Settings) -> RelayId {
-            RelayId {
-                enabled: settings.relay_enabled,
-                listen_port: settings.relay_listen_port,
-                connect_host: settings.relay_connect_host.clone(),
-                connect_port: settings.relay_connect_port,
-                fake_sni: settings.relay_fake_sni.clone(),
-                resolve_doh: settings.relay_resolve_doh,
-                doh_server: settings.doh_server.clone(),
-                mutate_real_sni: settings.relay_mutate_real_sni,
-                emit_decoy: settings.relay_emit_decoy,
-                require_inject: settings.relay_require_inject,
-                idle_timeout_secs: settings.idle_timeout_secs,
-            }
-        }
-
-        fn stop(&mut self) {
-            if let Some(f) = self.flag.take() {
-                f.store(false, Ordering::SeqCst);
-            }
-            if let Some(h) = self.handle.take() {
-                let _ = h.join();
-            }
-            self.id = None;
-            self.last_ip = None;
-        }
-
-        /// True when the settings ask for a relay but none is running.
-        ///
-        /// That is the state a failed start leaves behind: the network was
-        /// down at boot, the destination would not resolve, or the listen
-        /// port was taken. Without a periodic retry the relay would stay
-        /// dead until the operator happened to touch `dpi_guard.toml`,
-        /// which is exactly the wrong behaviour on a link that drops and
-        /// comes back all day.
-        fn wants_but_not_running(&self, settings: &config::Settings) -> bool {
-            settings.relay_enabled && self.id.is_none()
-        }
-
-        /// Start (or restart) the relay with an already-resolved IP. Fast
-        /// path: no DNS, no DoH — safe to call from the watchdog tick.
-        fn start_with_ip(
-            &mut self,
-            want: RelayId,
-            connect_ip: std::net::IpAddr,
-            pipeline: Arc<Mutex<Pipeline>>,
-        ) {
-            self.stop();
-            {
-                let mut p = dpi_guard::recover_mutex(&pipeline);
-                p.configure_relay(Some(dpi_guard::relay::RelayMode {
-                    fake_sni: want.fake_sni.clone(),
-                    connect_port: want.connect_port,
-                    mutate_real_sni: want.mutate_real_sni,
-                    emit_decoy: want.emit_decoy,
-                    require_inject: want.require_inject,
-                }));
-            }
-            let target = dpi_guard::relay::RelayTarget {
-                connect_ip,
-                connect_port: want.connect_port,
-                fake_sni: want.fake_sni.clone(),
-                require_inject: want.require_inject,
-                idle_timeout: std::time::Duration::from_secs(want.idle_timeout_secs.max(1)),
-            };
-            let flag = Arc::new(AtomicBool::new(true));
-            let pipe = pipeline.clone();
-            let pipe_close = pipeline.clone();
-            let hooks = dpi_guard::relay::FlowHooks::new(
-                move |flow| {
-                    let mut p = dpi_guard::recover_mutex(&pipe);
-                    p.register_relay_flow(flow)
-                },
-                move |flow| {
-                    // Release the slot as soon as the connection ends,
-                    // instead of waiting for the idle sweep. A destination
-                    // that always fails injection would otherwise fill the
-                    // table and start evicting healthy live flows.
-                    let mut p = dpi_guard::recover_mutex(&pipe_close);
-                    p.unregister_relay_flow(flow);
-                },
-            );
-            match dpi_guard::relay::run(target.clone(), want.listen_port, flag.clone(), hooks) {
-                Ok(h) => {
-                    log::info!(
-                        "relay started: 127.0.0.1:{} -> {} (fake SNI {:?}, require_inject={})",
-                        want.listen_port,
-                        dpi_guard::stealth::redact_endpoint(&format!(
-                            "{}:{}",
-                            connect_ip, want.connect_port
-                        )),
-                        want.fake_sni,
-                        want.require_inject
-                    );
-                    self.flag = Some(flag);
-                    self.handle = Some(h);
-                    self.id = Some(want);
-                    self.last_ip = Some(connect_ip);
-                }
-                Err(e) => log::error!("relay start failed: {e}"),
-            }
-        }
-
-        /// Spawn a background thread that resolves the destination for
-        /// `want`. The result lands in `self.resolved` and is applied by the
-        /// next `reconcile` call, so the watchdog tick never blocks on DoH
-        /// (previously a retry could stall held-packet flushing for up to
-        /// the ~16 s DoH budget).
-        fn kick_resolution(&mut self, want: RelayId) {
-            if self.resolving.as_ref() == Some(&want) {
-                return; // already resolving this exact configuration
-            }
-            self.resolving = Some(want.clone());
-            let slot = self.resolved.clone();
-            std::thread::Builder::new()
-                .name("dpi_guard-relay-resolve".into())
-                .spawn(move || {
-                    let ip = resolve_relay_ip(&want);
-                    *dpi_guard::recover_mutex(&slot) = Some((want, ip));
-                })
-                .ok();
-        }
-
-        fn reconcile(&mut self, settings: &config::Settings, pipeline: Arc<Mutex<Pipeline>>) {
-            let want = Self::desired(settings);
-
-            // (a) Apply a finished background resolution, if any.
-            let finished = dpi_guard::recover_mutex(&self.resolved).take();
-            if let Some((want_id, ip)) = finished {
-                self.resolving = None;
-                if let Some(ip) = ip {
-                    let config_changed = self.id.as_ref() != Some(&want_id);
-                    let ip_changed = self.last_ip != Some(ip);
-                    if want_id.enabled && (config_changed || ip_changed) {
-                        if ip_changed && !config_changed {
-                            log::info!(
-                                "relay destination DNS changed; restarting relay with the new IP"
-                            );
-                        }
-                        // Fail-closed: never start the relay without a live
-                        // capture handle. The boot ordering below reconciles
-                        // only when ready, and this gate keeps the watchdog
-                        // from starting the relay on a later pass when
-                        // capture never came up (audit gap: boot-only gate).
-                        if dpi_guard::engine::capture_is_ready() {
-                            self.start_with_ip(want_id, ip, pipeline.clone());
-                        } else {
-                            log::warn!("relay start deferred: capture not ready (fail-closed)");
-                        }
-                        return;
-                    }
-                } else {
-                    log::error!("relay destination resolution failed; will retry");
-                }
-            }
-
-            // (b) Nothing to do when the running relay already matches.
-            if self.id.as_ref() == Some(&want) {
-                return;
-            }
-            if !want.enabled {
-                self.stop();
-                {
-                    let mut p = dpi_guard::recover_mutex(&pipeline);
-                    p.configure_relay(None);
-                }
-                return;
-            }
-
-            // (c) Resolve the destination off-thread. Resolve BEFORE
-            // tearing down the old relay: if the new destination won't
-            // resolve, keep the previous relay running (fail-closed). The
-            // watchdog tick returns immediately; the result is applied by
-            // the next reconcile pass.
-            //
-            // Fail-closed: no capture, no relay — not at boot, not later.
-            // A stop (path (b) above) always runs; only (re)starts are
-            // gated, so disabling the relay can never be blocked by this.
-            if !dpi_guard::engine::capture_is_ready() {
-                if want.enabled && self.id.is_none() {
-                    log::debug!("relay start deferred: capture not ready (fail-closed)");
-                }
-                return;
-            }
-            self.kick_resolution(want);
-        }
-    }
-
-    /// Resolve the relay destination for a wanted relay config, honoring
-    /// `relay_resolve_doh`. Runs on a dedicated thread; never call this on
-    /// the watchdog thread.
-    fn resolve_relay_ip(want: &RelayId) -> Option<std::net::IpAddr> {
-        let connect_ip = if want.resolve_doh {
-            match dpi_guard::doh::resolve_a_v4(&want.connect_host, &want.doh_server)
-                .and_then(|ips| {
-                    ips.into_iter().next().ok_or_else(|| {
-                        dpi_guard::DpiGuardError::Resolution("no addresses resolved".into())
-                    })
-                }) {
-                Ok(ip) => ip,
-                Err(e) => {
-                    log::error!("relay destination resolution failed: {e}");
-                    return None;
-                }
-            }
-        } else {
-            match want.connect_host.parse::<std::net::IpAddr>() {
-                Ok(ip) => ip,
-                Err(e) => {
-                    log::error!(
-                        "relay_connect_host is not an IP and relay_resolve_doh is off: {e}"
-                    );
-                    return None;
-                }
-            }
-        };
-        // Validate the resolved/parsed IP (loopback/link-local/etc.).
-        match dpi_guard::netguard::validate_relay_ip(connect_ip) {
-            Ok(()) => Some(connect_ip),
-            Err(e) => {
-                log::error!("relay destination rejected: {e}");
-                None
-            }
-        }
-    }
 
     engine::thread_safe_logging_init();
 
@@ -453,7 +459,9 @@ fn backend_main() {
                 );
             }
         }
-        if !detected.iter().any(|d| d.running) {
+        if let Some(first) = dpi_guard::client_detect::first_running() {
+            log::info!("first active client detected: {:?}", first);
+        } else if !dpi_guard::client_detect::any_running() {
             log::info!("client detect: no known proxy client running");
         }
     }
@@ -501,7 +509,7 @@ fn backend_main() {
                 );
                 log::info!(
                     "LAN devices seen in the ARP table: {}",
-                    dpi_guard::mobile_gateway::detect_lan_devices().len()
+                    dpi_guard::mobile_gateway::connected_device_count()
                 );
             })
             .ok();
@@ -600,6 +608,16 @@ fn backend_main() {
             log::warn!("{name} is set but {gap} (audit F-003)");
         }
     }
+
+    if let Some(tdns) = &settings.trusted_dns {
+        if let Ok(ip) = tdns.parse() {
+            let _ = dpi_guard::dns_guard::hijack_dns_requests_target(ip);
+        }
+    }
+    let _ = dpi_guard::connection::parse_ip_list(&settings.rotate_ips);
+    let _ = dpi_guard::dns_guard::init_wfp_hook_spec();
+    let _ = dpi_guard::dns_guard::dns_protection_filters();
+    let _ = dpi_guard::dns_guard::block_port_53_except_localhost_spec();
 
     log::warn!(
         "DNS leak protection is INACTIVE (WFP FFI is a stub): port-53 queries are plaintext. \
@@ -982,7 +1000,6 @@ fn backend_main_non_windows() {
     std::process::exit(1);
 }
 
-
 // Launch the native controller by default. Passing --backend is reserved for
 // the child packet-engine process started by the controller.
 #[cfg(windows)]
@@ -1002,5 +1019,138 @@ fn main() {
     } else if let Err(e) = dpi_guard::native_gui::run() {
         eprintln!("dpi_guard GUI failed: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_id_desired_and_equality() {
+        let mut s = config::Settings::default();
+        s.relay_enabled = true;
+        s.relay_listen_port = 1080;
+        s.relay_connect_host = "1.1.1.1".into();
+        s.relay_connect_port = 443;
+        s.relay_fake_sni = "www.bing.com".into();
+
+        let id1 = RelayId::desired(&s);
+        assert!(id1.enabled);
+        assert_eq!(id1.listen_port, 1080);
+        assert_eq!(id1.connect_host, "1.1.1.1");
+        assert_eq!(id1.connect_port, 443);
+        assert_eq!(id1.fake_sni, "www.bing.com");
+
+        let id2 = RelayId::desired(&s);
+        assert_eq!(id1, id2);
+
+        s.relay_fake_sni = "www.microsoft.com".into();
+        let id3 = RelayId::desired(&s);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn relay_runtime_wants_but_not_running_lifecycle() {
+        let mut rt = RelayRuntime::new();
+        let mut s = config::Settings::default();
+        s.relay_enabled = false;
+        assert!(!rt.wants_but_not_running(&s));
+
+        s.relay_enabled = true;
+        assert!(rt.wants_but_not_running(&s));
+
+        rt.id = Some(RelayId::desired(&s));
+        assert!(!rt.wants_but_not_running(&s));
+
+        rt.stop();
+        assert!(rt.id.is_none());
+        assert!(rt.wants_but_not_running(&s));
+    }
+
+    #[test]
+    fn reconcile_handles_poisoned_mutex_gracefully() {
+        let mut rt = RelayRuntime::new();
+        // Artificially poison the resolved slot mutex
+        let slot = rt.resolved.clone();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = slot.lock().unwrap();
+            panic!("poisoning resolved mutex");
+        }));
+        assert!(rt.resolved.is_poisoned());
+
+        let pipeline = Arc::new(Mutex::new(Pipeline::new(config::Settings::default())));
+        let pipe_mutex = pipeline.clone();
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _g = pipe_mutex.lock().unwrap();
+            panic!("poisoning pipeline mutex");
+        }));
+        assert!(pipeline.is_poisoned());
+
+        // Reconcile must not panic despite poisoned mutexes
+        let mut s = config::Settings::default();
+        s.relay_enabled = false;
+        rt.reconcile(&s, pipeline.clone());
+        assert!(rt.id.is_none());
+    }
+
+    #[test]
+    fn resolve_relay_ip_with_ip_literal() {
+        let want = RelayId {
+            enabled: true,
+            listen_port: 1080,
+            connect_host: "1.1.1.1".into(),
+            connect_port: 443,
+            fake_sni: "www.bing.com".into(),
+            resolve_doh: false,
+            doh_server: "".into(),
+            mutate_real_sni: false,
+            emit_decoy: false,
+            require_inject: true,
+            idle_timeout_secs: 60,
+        };
+        let ip = resolve_relay_ip(&want);
+        assert_eq!(ip, Some(std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 1, 1, 1))));
+    }
+
+    #[test]
+    fn resolve_relay_ip_rejects_invalid_destination() {
+        let want_loopback = RelayId {
+            enabled: true,
+            listen_port: 1080,
+            connect_host: "127.0.0.1".into(),
+            connect_port: 443,
+            fake_sni: "www.bing.com".into(),
+            resolve_doh: false,
+            doh_server: "".into(),
+            mutate_real_sni: false,
+            emit_decoy: false,
+            require_inject: true,
+            idle_timeout_secs: 60,
+        };
+        assert_eq!(resolve_relay_ip(&want_loopback), None);
+
+        let want_non_ip = RelayId {
+            enabled: true,
+            listen_port: 1080,
+            connect_host: "not_an_ip".into(),
+            connect_port: 443,
+            fake_sni: "www.bing.com".into(),
+            resolve_doh: false,
+            doh_server: "".into(),
+            mutate_real_sni: false,
+            emit_decoy: false,
+            require_inject: true,
+            idle_timeout_secs: 60,
+        };
+        assert_eq!(resolve_relay_ip(&want_non_ip), None);
+    }
+
+    #[test]
+    fn redact_lan_and_edge_ips_guarantees() {
+        let raw_ip = "192.168.1.100";
+        let redacted = dpi_guard::stealth::redact_endpoint(raw_ip);
+        assert!(!redacted.contains("192.168.1.100"));
+        assert_eq!(redacted.len(), 16);
     }
 }
